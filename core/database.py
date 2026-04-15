@@ -216,6 +216,35 @@ def listing_exists(listing_id: str) -> bool:
     conn.close()
     return bool(row)
 
+def update_opportunity_analysis(lid: str, analysis: dict, financial: dict, pdf_path: str = None):
+    """Persist Ollama analysis + ROI results back to the opportunity row."""
+    conn = get_conn()
+    conn.execute("""
+        UPDATE opportunities
+        SET analysis  = ?,
+            financial = ?,
+            pdf_path  = ?,
+            processed = 1
+        WHERE id = ?
+    """, (
+        json.dumps(analysis,  ensure_ascii=False),
+        json.dumps(financial, ensure_ascii=False),
+        pdf_path,
+        lid,
+    ))
+    conn.commit()
+    conn.close()
+
+def get_opportunities(limit: int = 50) -> list[dict]:
+    """Return processed opportunities with analysis data, newest first."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM opportunities WHERE processed=1 ORDER BY created_at DESC LIMIT ?",
+        (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def get_source_stats() -> list[dict]:
     """Return per-source counts and last-seen timestamps."""
     conn = get_conn()

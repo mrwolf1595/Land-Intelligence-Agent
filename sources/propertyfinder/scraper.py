@@ -2,9 +2,10 @@
 PropertyFinder.sa real estate scraper.
 Fetches land listings from the SSR HTML pages (Next.js Pages Router).
 
-Strategy  : GET https://www.propertyfinder.sa/ar/search?c=1&fu=0&ob=mr&page=N
+Strategy  : GET https://www.propertyfinder.sa/ar/search?c=1&fu=0&ob=mr&t=LP&page=N
             Parse listing data from __NEXT_DATA__ JSON embedded in the HTML.
-            Path: props.pageProps.searchResult.listings[].listing.property
+            Tries multiple known JSON paths inside pageProps because the structure
+            changes between site versions.
 Yield     : land listings (type LP) across Saudi Arabia.
 Contact   : phone, whatsapp, and email available directly in the page data.
 """
@@ -16,10 +17,9 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
-from bs4 import BeautifulSoup
 
 from sources.base import BaseSource
-from config import PRICE_MIN, PRICE_MAX
+from config import PRICE_MIN, PRICE_MAX, TARGET_CITIES
 from core.logger import get_logger
 from core.database import listing_exists
 
@@ -70,14 +70,23 @@ _EN_TO_AR: dict[str, str] = {
 
 def _extract_next_data(html: str) -> Optional[dict]:
     """Parse __NEXT_DATA__ JSON from page HTML."""
-    soup = BeautifulSoup(html, "html.parser")
-    tag = soup.find("script", id="__NEXT_DATA__")
-    if not tag:
-        return None
     try:
-        return json.loads(tag.string)
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        tag = soup.find("script", id="__NEXT_DATA__")
+        if tag:
+            return json.loads(tag.string)
     except Exception:
-        return None
+        pass
+
+    # Fallback: regex extraction
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>', html, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
+    return None
 
 
 def _contact_phone(contact_options) -> Optional[str]:
@@ -116,6 +125,57 @@ def _image_url(images) -> str:
     return ""
 
 
+def _city_in_targets(city_ar: str) -> bool:
+    """Check whether the Arabic city name matches any TARGET_CITIES entry."""
+    if not city_ar or not TARGET_CITIES:
+        return True  # no filter → include all
+    city_lower = city_ar.lower()
+    for t in TARGET_CITIES:
+        if t in city_ar or city_ar in t or t.lower() in city_lower:
+            return True
+    return False
+
+
+def _extract_listings_from_nd(nd: dict) -> tuple[list, int]:
+    """
+    Extract the listings list and page count from __NEXT_DATA__.
+    Returns (listings_list, page_count).
+    Tries multiple known paths because PropertyFinder's internal structure varies.
+    """
+    page_props = nd.get("props", {}).get("pageProps", {})
+
+    # Known structure paths tried in order
+    search_result = (
+        page_props.get("searchResult") or
+        page_props.get("data", {}).get("searchResult") or
+        page_props.get("initialData", {}).get("searchResult") or
+        {}
+    )
+
+    # Listing objects can be at different keys
+    listing_objs = (
+        search_result.get("listings") or
+        search_result.get("properties") or
+        page_props.get("listings") or
+        page_props.get("properties") or
+        []
+    )
+
+    # Fallback: old path where each element is a flat property dict
+    if not listing_objs:
+        flat_props = search_result.get("properties") or []
+        listing_objs = [{"listing": {"property": p}} for p in flat_props]
+
+    # Page count
+    meta = search_result.get("meta") or search_result.get("pagination") or {}
+    page_count = int(
+        meta.get("page_count") or meta.get("pageCount") or
+        meta.get("total_pages") or meta.get("totalPages") or 1
+    )
+
+    return listing_objs, page_count
+
+
 class Scraper(BaseSource):
     name = "propertyfinder"
 
@@ -141,20 +201,13 @@ class Scraper(BaseSource):
                         logger.warning(f"PropertyFinder page {page}: no __NEXT_DATA__")
                         break
 
-                    sr           = nd.get("props", {}).get("pageProps", {}).get("searchResult", {})
-                    # New path: listings[].listing.property
-                    listing_objs = sr.get("listings", [])
-                    # Fallback to old path if listings key is absent
-                    if not listing_objs:
-                        listing_objs = [{"listing": {"property": p}} for p in sr.get("properties", [])]
-
-                    meta       = sr.get("meta", {})
-                    page_count = int(meta.get("page_count") or meta.get("pageCount") or 1)
+                    listing_objs, page_count = _extract_listings_from_nd(nd)
 
                     if page == 1:
-                        logger.info(f"PropertyFinder: {meta.get('total_count') or meta.get('totalCount')} listings, {page_count} pages")
+                        logger.info(f"PropertyFinder: {page_count} pages")
 
                     if not listing_objs:
+                        logger.warning(f"PropertyFinder page {page}: listing array empty")
                         break
 
                     stop_early = False
@@ -165,12 +218,27 @@ class Scraper(BaseSource):
                         else:
                             prop = listing_obj
 
-                        pid = str(prop.get("id") or prop.get("listing_id") or prop.get("reference") or "")
+                        pid = str(
+                            prop.get("id") or prop.get("listing_id") or
+                            prop.get("reference") or prop.get("externalID") or ""
+                        )
                         if not pid or pid in seen_ids:
                             continue
 
-                        price = float((prop.get("price") or {}).get("value") or 0)
+                        # Price can be nested or flat
+                        price_raw = prop.get("price")
+                        if isinstance(price_raw, dict):
+                            price = float(price_raw.get("value") or 0)
+                        else:
+                            price = float(price_raw or 0)
+
                         if price and not (PRICE_MIN <= price <= PRICE_MAX):
+                            continue
+
+                        # City filter
+                        location_tree = prop.get("location_tree") or []
+                        city_ar = _city_arabic(location_tree)
+                        if not _city_in_targets(city_ar):
                             continue
 
                         lid = f"pf_{pid}"
@@ -192,7 +260,7 @@ class Scraper(BaseSource):
                         break
 
                 except Exception as exc:
-                    logger.error(f"PropertyFinder page {page} error: {exc}")
+                    logger.error(f"PropertyFinder page {page} error: {exc}", exc_info=True)
                     break
 
                 page += 1
@@ -210,14 +278,20 @@ class Scraper(BaseSource):
         details    = raw.get("details_path", "")
         source_url = f"{_BASE}{details}" if details else ""
 
+        price_val = (
+            float(price_obj.get("value") or 0)
+            if isinstance(price_obj, dict)
+            else float(price_obj or 0)
+        )
+
         return {
             "listing_id":    f"pf_{pid}",
             "source":        self.name,
             "title":         raw.get("title", "Land for Sale"),
             "city":          _city_arabic(location_tree),
             "district":      _district(location_tree),
-            "area_sqm":      float(size_obj.get("value") or 0),
-            "price_sar":     float(price_obj.get("value") or 0),
+            "area_sqm":      float(size_obj.get("value") if isinstance(size_obj, dict) else size_obj or 0),
+            "price_sar":     price_val,
             "contact_phone": _contact_phone(raw.get("contact_options")),
             "image_urls":    _image_url(raw.get("images")),
             "source_url":    source_url,
