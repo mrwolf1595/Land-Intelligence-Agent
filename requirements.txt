@@ -15,5 +15,5 @@ python-bidi>=0.4.2
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 Brotli>=1.1.0
-cloudscraper>=2.3.7
+cloudscraper>=1.2.71
 selenium>=4.18.0
