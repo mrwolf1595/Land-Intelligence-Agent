@@ -2,9 +2,10 @@
 PropertyFinder.sa real estate scraper.
 Fetches land listings from the SSR HTML pages (Next.js Pages Router).
 
-Strategy  : GET https://www.propertyfinder.sa/en/buy/land-for-sale.html?page=N
+Strategy  : GET https://www.propertyfinder.sa/ar/search?c=1&fu=0&ob=mr&page=N
             Parse listing data from __NEXT_DATA__ JSON embedded in the HTML.
-Yield     : ~179 listings (all Saudi lands), 25/page, up to 8 pages.
+            Path: props.pageProps.searchResult.listings[].listing.property
+Yield     : land listings (type LP) across Saudi Arabia.
 Contact   : phone, whatsapp, and email available directly in the page data.
 """
 
@@ -25,7 +26,7 @@ from core.database import listing_exists
 logger = get_logger("propertyfinder")
 
 _BASE     = "https://www.propertyfinder.sa"
-_LIST_URL = f"{_BASE}/en/buy/land-for-sale.html"
+_LIST_URL = f"{_BASE}/ar/search"
 
 _HEADERS = {
     "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -127,7 +128,8 @@ class Scraper(BaseSource):
 
         with httpx.Client(headers=_HEADERS, timeout=30, follow_redirects=True) as client:
             while True:
-                url = _LIST_URL if page == 1 else f"{_LIST_URL}?page={page}"
+                # c=1 for sale, fu=0, ob=mr most recent, t=LP land plot
+                url = f"{_LIST_URL}?c=1&fu=0&ob=mr&t=LP&page={page}"
                 try:
                     resp = client.get(url)
                     if resp.status_code != 200:
@@ -139,20 +141,31 @@ class Scraper(BaseSource):
                         logger.warning(f"PropertyFinder page {page}: no __NEXT_DATA__")
                         break
 
-                    sr         = nd.get("props", {}).get("pageProps", {}).get("searchResult", {})
-                    properties = sr.get("properties", [])
+                    sr           = nd.get("props", {}).get("pageProps", {}).get("searchResult", {})
+                    # New path: listings[].listing.property
+                    listing_objs = sr.get("listings", [])
+                    # Fallback to old path if listings key is absent
+                    if not listing_objs:
+                        listing_objs = [{"listing": {"property": p}} for p in sr.get("properties", [])]
+
                     meta       = sr.get("meta", {})
-                    page_count = meta.get("page_count", 1)
+                    page_count = int(meta.get("page_count") or meta.get("pageCount") or 1)
 
                     if page == 1:
-                        logger.info(f"PropertyFinder: {meta.get('total_count')} listings, {page_count} pages")
+                        logger.info(f"PropertyFinder: {meta.get('total_count') or meta.get('totalCount')} listings, {page_count} pages")
 
-                    if not properties:
+                    if not listing_objs:
                         break
 
                     stop_early = False
-                    for prop in properties:
-                        pid = str(prop.get("id") or prop.get("listing_id") or "")
+                    for listing_obj in listing_objs:
+                        # Support both {listing: {property: ...}} and flat property dict
+                        if "listing" in listing_obj:
+                            prop = listing_obj["listing"].get("property") or listing_obj["listing"]
+                        else:
+                            prop = listing_obj
+
+                        pid = str(prop.get("id") or prop.get("listing_id") or prop.get("reference") or "")
                         if not pid or pid in seen_ids:
                             continue
 
@@ -173,7 +186,7 @@ class Scraper(BaseSource):
                         seen_ids.add(pid)
                         all_items.append(prop)
 
-                    logger.info(f"  page {page}/{page_count}: +{len(properties)} listings")
+                    logger.info(f"  page {page}/{page_count}: +{len(listing_objs)} listings")
 
                     if stop_early or page >= page_count:
                         break

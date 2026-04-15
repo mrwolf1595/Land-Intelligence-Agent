@@ -7,6 +7,9 @@ import uuid
 from ollama import Client
 from config import OLLAMA_API_URL, OLLAMA_MODEL, MIN_MATCH_SCORE
 from core.database import get_unmatched, save_match
+from core.logger import get_logger
+
+logger = get_logger("matcher")
 
 
 def _extract_json(text: str) -> str:
@@ -101,5 +104,5 @@ def _score_match(req: dict, offer: dict) -> dict:
         raw = response.message.content.strip()
         return json.loads(_extract_json(raw))
     except Exception as e:
-        print(f"[matcher] Scoring error: {e}")
+        logger.error(f"Scoring error: {e}")
         return {"match_score": 0, "reasoning": "خطأ في التقييم", "broker_tip": "", "key_gaps": []}

@@ -10,6 +10,9 @@ import os
 import uuid
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
+from core.logger import get_logger
+
+logger = get_logger("proposal")
 
 try:
     import arabic_reshaper
@@ -62,12 +65,13 @@ def generate_proposal(analysis: dict, financial: dict, mockup: dict = None) -> s
     os.makedirs(os.path.dirname(output_filename), exist_ok=True)
     
     if not _PDF_AVAILABLE:
-        print("[proposal] WeasyPrint unavailable (requires GTK — run on Linux). Skipping PDF.")
+        logger.warning("WeasyPrint unavailable (requires GTK — run on Linux). Skipping PDF.")
         return None
 
     try:
         HTML(string=html_str).write_pdf(output_filename)
+        logger.info(f"PDF generated: {output_filename}")
         return output_filename
     except Exception as e:
-        print(f"[proposal] Failed to generate PDF: {e}")
+        logger.error(f"Failed to generate PDF: {e}")
         return None
