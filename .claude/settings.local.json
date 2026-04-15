@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -c ':*)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__read_network_requests",
+      "mcp__Claude_in_Chrome__javascript_tool",
+      "Bash(.venv/Scripts/python.exe -c \"import ollama; print\\('ollama version:', ollama.__version__\\); from ollama import Client; print\\('Client OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ollama; print\\(ollama.__version__\\)\")",
+      "Bash(.venv/Scripts/pip show:*)",
+      "mcp__Claude_in_Chrome__find",
+      "Bash(python -c ':*)"
+    ]
+  }
+}
