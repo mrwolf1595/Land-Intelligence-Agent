@@ -1,0 +1,102 @@
+"""
+Sends match notifications to the BROKER (you) via WhatsApp Node Bridge.
+"""
+import httpx
+from config import WA_BRIDGE_PORT, BROKER_WHATSAPP
+
+WA_BRIDGE_URL = f"http://localhost:{WA_BRIDGE_PORT}"
+
+def format_match_message(match: dict) -> str:
+    score_pct = int(match.get("match_score", 0) * 100)
+    score_emoji = "🟢" if score_pct >= 80 else "🟡" if score_pct >= 65 else "🟠"
+
+    msg = f"""🏠 *تطابق عقاري جديد* {score_emoji} {score_pct}%
+━━━━━━━━━━━━━━━━━━━━
+
+📋 *الطالب:*
+• الاسم: {match.get('req_name', 'غير محدد')}
+• المجموعة: {match.get('req_group', '')}
+• الطلب: {match.get('req_text', '')[:200]}
+• المدينة: {match.get('req_city', 'غير محددة')}
+• السعر: {_fmt_price(match.get('req_price'))}
+━━━━━━━━━━━━━━━━━━━━
+
+🏗️ *العارض:*
+• الاسم: {match.get('off_name', 'غير محدد')}
+• المجموعة: {match.get('off_group', '')}
+• العرض: {match.get('off_text', '')[:200]}
+• المدينة: {match.get('off_city', 'غير محددة')}
+• السعر: {_fmt_price(match.get('off_price'))}
+━━━━━━━━━━━━━━━━━━━━
+
+🤝 *سبب التطابق:*
+{match.get('match_reasoning', '')}
+
+💡 *نصيحة:*
+{match.get('broker_tip', '')}
+
+🆔 Match ID: {match.get('match_id', '')[:8]}"""
+
+    return msg
+
+def notify_broker_match(match: dict) -> bool:
+    message = format_match_message(match)
+    return _send_whatsapp(BROKER_WHATSAPP, message)
+
+def notify_broker_opportunity(analysis: dict, financial: dict, pdf_path: str = None) -> bool:
+    roi = financial.get("roi_pct", 0)
+    score = analysis.get("opportunity_score", 0)
+
+    msg = f"""🏗️ *فرصة عقارية عالية القيمة*
+━━━━━━━━━━━━━━━━━━━━
+
+📍 الموقع: {analysis.get('location', 'غير محدد')}
+📐 المساحة: {analysis.get('land_area_sqm', '?')} م²
+💰 السعر: {_fmt_price(analysis.get('asking_price_sar'))}
+🏆 درجة الفرصة: {score}/10
+🏢 التطوير المقترح: {_dev_label(analysis.get('recommended_development'))}
+
+💹 *النموذج المالي:*
+• إجمالي الاستثمار: {_fmt_price(financial.get('total_investment_sar'))}
+• الإيرادات المتوقعة: {_fmt_price(financial.get('total_revenue_sar'))}
+• صافي الربح: {_fmt_price(financial.get('gross_profit_sar'))}
+• العائد: {roi}% خلال {financial.get('timeline_months', '?')} شهر
+
+🔗 {analysis.get('source_url', '')}
+{"📎 تم إرفاق الـ Proposal PDF" if pdf_path else ""}"""
+
+    return _send_whatsapp(BROKER_WHATSAPP, msg)
+
+def _send_whatsapp(to: str, message: str) -> bool:
+    if not to:
+        print("[notifier] Error: BROKER_WHATSAPP not set in .env")
+        return False
+    try:
+        r = httpx.post(
+            f"{WA_BRIDGE_URL}/send",
+            json={"to": to, "message": message},
+            timeout=10
+        )
+        if r.status_code == 200 and r.json().get('success'):
+            return True
+        return False
+    except Exception as e:
+        print(f"[notifier] WhatsApp send error: {e}")
+        return False
+
+def _fmt_price(price) -> str:
+    if not price:
+        return "غير محدد"
+    try:
+        return f"{int(price):,} ر.س"
+    except:
+        return f"{price} ر.س"
+
+def _dev_label(dev_type: str) -> str:
+    mapping = {
+        "apartments": "عمارة شقق",
+        "villas": "فلل مستقلة",
+        "commercial": "تجاري",
+        "mixed": "متعدد الاستخدامات"
+    }
+    return mapping.get(str(dev_type).lower(), "غير محدد")
