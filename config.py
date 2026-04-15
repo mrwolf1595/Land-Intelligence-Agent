@@ -55,7 +55,7 @@ FEATURES = {
 }
 
 # Default runtime sources: web scraping for discovery + optional DB adapters.
-ENABLED_SOURCES = ["aqar", "haraj", "bayut", "propertyfinder", "wasalt"]
+ENABLED_SOURCES = ["aqar", "haraj", "bayut", "propertyfinder", "wasalt", "sakan"]
 
 
 def validate_config() -> None:

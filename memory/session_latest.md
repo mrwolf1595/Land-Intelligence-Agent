@@ -1,95 +1,94 @@
-# Session Memory — 2026-04-15 (Session 3)
+# Session Memory — 2026-04-15 (Session 4)
 
-## What shipped
+## What shipped this session
 
-### Incremental Scraping System (priority work)
-- **`core/database.py` — new functions**:
-  - `save_opportunity(opp) -> bool` — INSERT OR IGNORE, returns True if new row
-  - `listing_exists(listing_id) -> bool` — fast dedup check
-  - `get_source_stats() -> list[dict]` — per-source count + last_seen
-  - `get_cursor(source) -> dict` — reads last_run_at / last_listing_id / last_count
-  - `set_cursor(source, last_listing_id, count)` — UPSERT after each run
-  - Fixed `mark_processed()` — INSERT OR IGNORE before UPDATE (was silent no-op)
-  - Added `scraper_cursors` table to `init_db()`
+### Pipeline cleanup — replaced all `print()` with logger
+- `pipeline/classifier.py` — added `get_logger("classifier")`, replaced error print
+- `pipeline/matcher.py`   — added `get_logger("matcher")`, replaced error print
+- `pipeline/analyzer.py`  — added `get_logger("analyzer")`, replaced error print
+- `pipeline/notifier.py`  — added `get_logger("notifier")`, replaced all prints (error + warning path)
+- `pipeline/proposal.py`  — added `get_logger("proposal")`, replaced prints (warning + error + success)
 
-- **`sources/base.py` — incremental `run()`**:
-  - Calls `listing_exists()` before saving → skips known listings
-  - Calls `save_opportunity()` for new ones → persists to DB automatically
-  - Calls `set_cursor()` at end of run
-  - Returns **only NEW listings** (first run = all; subsequent = delta only)
+All pipeline errors now route through `logs/agent.log` + stdout with consistent
+`[YYYY-MM-DD HH:MM:SS] LEVEL    module: message` format.
 
-- **`sources/wasalt/scraper.py` — complete rewrite**:
-  - Primary: HTTP GET `https://wasalt.sa/sale/search?page=N`, extracts `__NEXT_DATA__` JSON
-  - Filters by `propertySubType ∈ {أرض, أرض متعددة الاستخدام, أرض تجارية}`
-  - Early-stop: quits after 15 consecutive known listing IDs
-  - Falls back to SQLite adapter if HTTP returns 403
-  - `normalize()` handles both web-scraper and SQLite paths
+---
 
-- **Bayut scraper — incremental enhancement**:
-  - Reads `last_run_at` cursor → adds Algolia `numericFilters: updatedAt > <ts>`
-  - Early-stop at 30 consecutive known hits
-  
-- **Aqar / Haraj / PropertyFinder scrapers — incremental early-stop**:
-  - Each checks `listing_exists()` per listing
-  - Stops after 10 consecutive known listings per page/city
+## Full project status (end of Session 4)
 
-- **`dashboard/app.py` — Scraper Status section**:
-  - New section in Statistics tab: per-source table showing total listings,
-    last listing seen, last run time, and new count from last run
-  - Reads from `opportunities JOIN scraper_cursors`
+| Component | Status | Notes |
+|---|---|---|
+| `core/logger.py` | ✅ complete | UTF-8 stdout + file handler |
+| `core/scheduler.py` | ✅ complete | BlockingScheduler wrapper |
+| `core/database.py` | ✅ complete | incremental functions + migrations + indexes |
+| `config.py` | ✅ complete | `validate_config()` with feature summary |
+| `main.py` | ✅ complete | logger + scheduler + validate_config |
+| `pipeline/classifier.py` | ✅ complete | Ollama JSON, logger, `_extract_json` |
+| `pipeline/matcher.py` | ✅ complete | Ollama match scoring, logger |
+| `pipeline/analyzer.py` | ✅ complete | Ollama land analysis, logger |
+| `pipeline/notifier.py` | ✅ complete | WhatsApp bridge, logger |
+| `pipeline/proposal.py` | ✅ complete | WeasyPrint + graceful Windows skip, logger |
+| `pipeline/financial.py` | ✅ (not changed) | ROI calculator |
+| `pipeline/mockup.py` | ✅ (not changed) | ComfyUI mockup generator |
+| `sources/base.py` | ✅ complete | incremental `run()` with dedup |
+| `sources/aqar/scraper.py` | ✅ complete | GraphQL + cloudscraper + early-stop |
+| `sources/bayut/scraper.py` | ✅ complete | Algolia multi-index + incremental |
+| `sources/wasalt/scraper.py` | ✅ complete | httpx → Selenium → SQLite fallback |
+| `sources/propertyfinder/scraper.py` | ✅ complete | Next.js __NEXT_DATA__ |
+| `sources/haraj/scraper.py` | ✅ complete | React Router 7 turbo-stream |
+| `sources/sakan/scraper.py` | ✅ complete | BeautifulSoup HTML scraping |
+| `sources/whatsapp/bridge.py` | ✅ complete | FastAPI + /health endpoint |
+| `dashboard/app.py` | ✅ complete | Scraper status section + sqlite3.Row |
+
+---
 
 ## Architecture: Incremental Flow
 ```
-scraper.run()
+scraper.run()  (sources/base.py)
   │
-  ├─ fetch()           ← platform-specific HTTP / API
+  ├─ fetch()           ← platform-specific (httpx / Algolia / GraphQL / HTML)
   │    └─ early-stop when N consecutive known IDs hit
   │
   ├─ for each raw item:
   │    normalize() → listing_id
   │    listing_exists(listing_id)? → skip
-  │    save_opportunity()          → INSERT OR IGNORE
+  │    save_opportunity()          → INSERT OR IGNORE to DB
   │    append to new_listings
   │
   └─ set_cursor(source, first_new_id, count)
      return new_listings  ← only deltas
 ```
 
-## Tests run (all passed)
-- `save_opportunity`: first insert True, duplicate False ✓
-- `listing_exists`: True/False correctly ✓
-- `get_cursor` / `set_cursor` roundtrip ✓
-- `base.run()` mock: run1=3 new, run2=0 new ✓
-- All 5 scraper imports: OK ✓
+## Logging format
+```
+[2026-04-15 14:32:01] INFO     aqar: Scraping 12 cities
+[2026-04-15 14:32:05] INFO     aqar: الرياض page 0: 47 new listings
+[2026-04-15 14:32:11] WARNING  wasalt: HTTP 403 on page 0
+[2026-04-15 14:32:11] INFO     wasalt: Trying Selenium scraper...
+```
+Written to both stdout (UTF-8 on Windows too) and `logs/agent.log`.
 
-## Wasalt web scraping status
-- Wasalt.sa: Next.js SSR with `__NEXT_DATA__` containing `searchResult.properties`
-- URL pattern: `/sale/search?page=N` → 32 items/page, mixed types
-- ~6% are land listings (`propertySubType=أرض`)
-- Python httpx: **likely blocked (403)** → scraper falls back to SQLite adapter
-- Browser: fully accessible, data confirmed in `__NEXT_DATA__`
-- If Wasalt unblocks httpx (e.g., on a different IP/server): web scraper activates automatically
+## Deployment (Kali Linux)
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+pip install cloudscraper selenium
 
-## Current state
-| Component | Status |
-|---|---|
-| `core/database.py` | ✅ incremental functions added |
-| `sources/base.py` | ✅ incremental `run()` |
-| `sources/wasalt/scraper.py` | ✅ rewritten (HTTP + SQLite fallback) |
-| `sources/bayut/scraper.py` | ✅ incremental (Algolia timestamp filter) |
-| `sources/aqar/scraper.py` | ✅ incremental (early-stop) |
-| `sources/haraj/scraper.py` | ✅ incremental (early-stop) |
-| `sources/propertyfinder/scraper.py` | ✅ incremental (early-stop) |
-| `dashboard/app.py` | ✅ Scraper Status section added |
+# 2. Copy & fill .env
+cp .env.example .env
+nano .env  # set BROKER_WHATSAPP, models, etc.
 
-## Rules added
-- R12: Store all scraped listings in DB immediately via `save_opportunity()` in `base.run()`.
-       Never rely on in-memory dedup across runs.
-- R13: Each scraper must implement early-stop when N consecutive known IDs are encountered.
-       Avoids re-fetching thousands of old listings on every run.
+# 3. Start agent
+python main.py --mode scrape     # one-shot scrape
+python main.py --mode match      # one-shot match
+python main.py                   # full scheduled mode
+
+# 4. Dashboard
+streamlit run dashboard/app.py
+```
 
 ## Deferred
-- WhatsApp session authentication (QR scan) — requires user interaction
-- Wasalt web scraping (HTTP side) — blocked in Python; works in browser; will auto-activate on Linux/VPS
-- Full end-to-end test: `python main.py --mode scrape` on Kali with Ollama running
-- Additional platforms: Ejar.sa, OpenSooq — low priority (limited SA land listings)
+- WhatsApp QR authentication — requires interactive terminal
+- Wasalt Selenium on Kali — needs `geckodriver` at `/usr/local/bin/geckodriver`
+- Aqar cloudscraper test on Kali — should bypass anti-bot automatically
+- End-to-end `python main.py --mode scrape` live test on Kali with Ollama running

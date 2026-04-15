@@ -6,6 +6,9 @@ import uuid
 from datetime import datetime
 from ollama import Client
 from config import OLLAMA_API_URL, OLLAMA_MODEL_FAST
+from core.logger import get_logger
+
+logger = get_logger("classifier")
 
 
 def _extract_json(text: str) -> str:
@@ -77,7 +80,7 @@ def classify_message(raw_msg: dict) -> dict:
         })
 
     except Exception as e:
-        print(f"[classifier] Error: {e}")
+        logger.error(f"Classification error: {e}")
         raw_msg["msg_type"] = "irrelevant"
 
     return raw_msg

@@ -8,6 +8,7 @@ Strategy:
 2. If HTTP returns 403 (bot-blocked): fall back to existing SQLite adapter.
 """
 import json
+import os
 import re
 import time
 import uuid
@@ -100,7 +101,12 @@ class Scraper(BaseSource):
         items = self._fetch_web()
         if items is not None:          # None = blocked; [] = ran but found nothing new
             return items
-        logger.warning("[wasalt] Web blocked (403) — falling back to SQLite adapter")
+        # httpx blocked — try Selenium
+        items = self._fetch_selenium()
+        if items is not None:
+            return items
+        # Selenium not available — SQLite fallback
+        logger.warning("[wasalt] All web methods failed — falling back to SQLite")
         return self._fetch_sqlite()
 
     # ── Web scraper ────────────────────────────────────────────────────────────
@@ -181,6 +187,98 @@ class Scraper(BaseSource):
                 time.sleep(1.0)
 
         logger.info(f"[wasalt] web done — {len(all_items)} new listings")
+        return all_items
+
+    # ── Selenium fallback ─────────────────────────────────────────────────────
+
+    def _fetch_selenium(self) -> Optional[list[dict]]:
+        """Try Selenium-based scraping (Kali Linux with geckodriver)."""
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.firefox.service import Service
+            from selenium.webdriver.firefox.options import Options
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from bs4 import BeautifulSoup as BS
+        except ImportError:
+            logger.info("[wasalt] Selenium not available")
+            return None
+
+        GECKO = "/usr/local/bin/geckodriver"
+        if not os.path.exists(GECKO):
+            logger.info(f"[wasalt] geckodriver not found at {GECKO}")
+            return None
+
+        logger.info("[wasalt] Trying Selenium scraper...")
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.set_preference("permissions.default.image", 2)  # disable images
+
+        try:
+            driver = webdriver.Firefox(service=Service(GECKO), options=options)
+        except Exception as e:
+            logger.error(f"[wasalt] Firefox launch failed: {e}")
+            return None
+
+        all_items = []
+        seen_ids: set = set()
+        consecutive_known = 0
+
+        try:
+            for page in range(_MAX_PAGES):
+                url = f"{_SEARCH_URL}?propertyFor=sale&countryId=1&type=residential&page={page}"
+                try:
+                    driver.get(url)
+                    WebDriverWait(driver, 30).until(
+                        EC.presence_of_element_located((By.ID, "__NEXT_DATA__"))
+                    )
+                    soup = BS(driver.page_source, "html.parser")
+                    script = soup.find("script", id="__NEXT_DATA__")
+                    if not script:
+                        break
+                    nd = json.loads(script.string)
+                except Exception as e:
+                    logger.error(f"[wasalt] Selenium page {page} error: {e}")
+                    break
+
+                props = nd.get("props", {}).get("pageProps", {}).get("searchResult", {}).get("properties", [])
+                if not props:
+                    break
+
+                new_on_page = 0
+                for prop in props:
+                    info = prop.get("propertyInfo") or {}
+                    if info.get("propertySubType") not in _LAND_TYPES:
+                        continue
+                    eid = str(prop.get("id", ""))
+                    if not eid or eid in seen_ids:
+                        continue
+                    seen_ids.add(eid)
+                    lid = f"wasalt_{eid}"
+                    if listing_exists(lid):
+                        consecutive_known += 1
+                        continue
+                    consecutive_known = 0
+                    price = float(info.get("salePrice") or info.get("conversionPrice") or 0)
+                    if price and not (PRICE_MIN <= price <= PRICE_MAX):
+                        continue
+                    city = info.get("city", "")
+                    if TARGET_CITIES and not _city_matches(city):
+                        continue
+                    all_items.append(prop)
+                    new_on_page += 1
+
+                logger.info(f"[wasalt] Selenium page {page}: {new_on_page} new")
+                if consecutive_known >= _EARLY_STOP:
+                    logger.info("[wasalt] Early stop (consecutive known)")
+                    break
+                time.sleep(2.0)
+        finally:
+            driver.quit()
+
+        logger.info(f"[wasalt] Selenium done — {len(all_items)} new listings")
         return all_items
 
     # ── SQLite fallback ────────────────────────────────────────────────────────

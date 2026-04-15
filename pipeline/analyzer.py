@@ -5,6 +5,9 @@ No vision model - pure text metrics.
 import json
 from ollama import Client
 from config import OLLAMA_API_URL, OLLAMA_MODEL
+from core.logger import get_logger
+
+logger = get_logger("analyzer")
 
 
 def _extract_json(text: str) -> str:
@@ -63,5 +66,5 @@ def analyze_land(listing_data: dict) -> dict:
         parsed["source_url"] = listing_data.get("source_url", "")
         return parsed
     except Exception as e:
-        print(f"[analyzer] Error: {e}")
+        logger.error(f"Analysis error: {e}")
         return {"opportunity_score": 0, "score_reasoning": str(e)}

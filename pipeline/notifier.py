@@ -3,6 +3,9 @@ Sends match notifications to the BROKER (you) via WhatsApp Node Bridge.
 """
 import httpx
 from config import WA_BRIDGE_PORT, BROKER_WHATSAPP
+from core.logger import get_logger
+
+logger = get_logger("notifier")
 
 WA_BRIDGE_URL = f"http://localhost:{WA_BRIDGE_PORT}"
 
@@ -69,7 +72,7 @@ def notify_broker_opportunity(analysis: dict, financial: dict, pdf_path: str = N
 
 def _send_whatsapp(to: str, message: str) -> bool:
     if not to:
-        print("[notifier] Error: BROKER_WHATSAPP not set in .env")
+        logger.error("BROKER_WHATSAPP not set in .env — cannot send notification")
         return False
     try:
         r = httpx.post(
@@ -79,9 +82,10 @@ def _send_whatsapp(to: str, message: str) -> bool:
         )
         if r.status_code == 200 and r.json().get('success'):
             return True
+        logger.warning(f"WhatsApp send returned status {r.status_code}")
         return False
     except Exception as e:
-        print(f"[notifier] WhatsApp send error: {e}")
+        logger.error(f"WhatsApp send error: {e}")
         return False
 
 def _fmt_price(price) -> str:
