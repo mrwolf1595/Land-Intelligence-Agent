@@ -1,7 +1,9 @@
 """
 Sakan.co Saudi Arabia scraper (sa.sakan.co).
-HTML scraping — listings page + detail page.
+HTML scraping — listings page. Uses multiple selector strategies because
+Sakan uses CSS Modules (hashed class names that change between builds).
 """
+import json
 import re
 import time
 from datetime import datetime
@@ -17,9 +19,9 @@ from sources.base import BaseSource
 
 logger = get_logger("sakan")
 
-_BASE = "https://sa.sakan.co"
-_SEARCH = f"{_BASE}/ar/properties/sale"
-_PER_PAGE = 21
+_BASE      = "https://sa.sakan.co"
+_SEARCH    = f"{_BASE}/ar/properties/sale"
+_PER_PAGE  = 21
 _MAX_PAGES = 50
 
 _HEADERS = {
@@ -55,6 +57,42 @@ def _city_matches(location: str) -> bool:
     return any(city in loc or loc in city for city in TARGET_CITIES)
 
 
+def _extract_json_ld(soup) -> list[dict]:
+    """Try JSON-LD structured data embedded in the page as a listing source."""
+    items = []
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(tag.string or "")
+            # Could be a single item or a list
+            if isinstance(data, list):
+                items.extend(data)
+            elif isinstance(data, dict):
+                items.append(data)
+        except Exception:
+            continue
+    return items
+
+
+def _extract_next_data(soup) -> Optional[dict]:
+    """Try __NEXT_DATA__ JSON if Sakan uses Next.js."""
+    tag = soup.find("script", id="__NEXT_DATA__")
+    if not tag:
+        return None
+    try:
+        return json.loads(tag.string)
+    except Exception:
+        return None
+
+
+def _find_text_by_patterns(el, patterns: list) -> str:
+    """Try multiple CSS class regex patterns to find an element text."""
+    for pat in patterns:
+        found = el.find(attrs={"class": re.compile(pat, re.I)})
+        if found:
+            return found.get_text(strip=True)
+    return ""
+
+
 class Scraper(BaseSource):
     name = "sakan"
 
@@ -72,7 +110,7 @@ class Scraper(BaseSource):
 
         with httpx.Client(headers=_HEADERS, timeout=30, follow_redirects=True) as client:
             for page in range(1, _MAX_PAGES + 1):
-                url = f"{_SEARCH}?page={page}" if page > 1 else _SEARCH
+                url = f"{_SEARCH}?page={page}&propertyTypes=land" if page > 1 else f"{_SEARCH}?propertyTypes=land"
                 try:
                     resp = client.get(url)
                     if resp.status_code != 200:
@@ -83,15 +121,55 @@ class Scraper(BaseSource):
                     break
 
                 soup = BeautifulSoup(resp.text, "html.parser")
-                cards = soup.find_all("div", class_=re.compile(r"card"))
+
+                # ── Strategy 1: __NEXT_DATA__ (fastest, most structured) ──────
+                nd = _extract_next_data(soup)
+                if nd:
+                    listings_from_nd = self._parse_next_data(nd)
+                    if listings_from_nd:
+                        for item in listings_from_nd:
+                            ref_id = item.get("ref_id", "")
+                            lid = f"sakan_{ref_id}"
+                            if ref_id in seen_refs:
+                                continue
+                            seen_refs.add(ref_id)
+                            if listing_exists(lid):
+                                consecutive_known += 1
+                                continue
+                            consecutive_known = 0
+                            price = item.get("price", 0)
+                            if price and not (PRICE_MIN <= price <= PRICE_MAX):
+                                continue
+                            if not _city_matches(item.get("location", "")):
+                                continue
+                            all_items.append(item)
+                        logger.info(f"[sakan] page {page} (next-data): {len(listings_from_nd)} found")
+                        if len(listings_from_nd) < _PER_PAGE:
+                            break
+                        time.sleep(1.0)
+                        continue
+
+                # ── Strategy 2: HTML card parsing ─────────────────────────────
+                # Try multiple selectors because CSS Modules hashes class names
+                cards = (
+                    soup.find_all("div", class_=re.compile(r"\bcard\b", re.I)) or
+                    soup.find_all("article") or
+                    soup.find_all("div", attrs={"data-testid": re.compile(r"card|property|listing", re.I)})
+                )
+
                 if not cards:
+                    logger.warning(f"[sakan] page {page}: no cards found — page structure may have changed")
+                    logger.debug(f"[sakan] page HTML snippet: {resp.text[:500]}")
                     break
 
                 new_on_page = 0
                 for card in cards:
                     try:
-                        # URL
-                        link = card.find("a", class_=re.compile(r"track_link|card.*title|title"))
+                        # URL — try several link patterns
+                        link = (
+                            card.find("a", class_=re.compile(r"track_link|title|card", re.I)) or
+                            card.find("a", href=re.compile(r"/property|/ar/"))
+                        )
                         if not link or not link.get("href"):
                             continue
                         href = link["href"]
@@ -112,25 +190,27 @@ class Scraper(BaseSource):
                         consecutive_known = 0
 
                         # Title
-                        h2 = link.find("h2") or link
+                        h2 = link.find(["h1", "h2", "h3"]) or link
                         title = h2.get_text(strip=True) if h2 else ""
 
-                        # Price
-                        price_el = card.find("div", class_=re.compile(r"price"))
-                        price_span = price_el.find("span") if price_el else None
-                        price = _parse_price(price_span.get_text() if price_span else "")
+                        # Price — multiple selector patterns
+                        price_text = _find_text_by_patterns(card, [r"price", r"سعر", r"cost"])
+                        price = _parse_price(price_text)
 
                         # Location
-                        loc_el = card.find("div", class_=re.compile(r"location"))
-                        loc_span = loc_el.find("span", class_=re.compile(r"gray|fn--gray")) if loc_el else None
-                        location = loc_span.get_text(strip=True) if loc_span else ""
+                        location = _find_text_by_patterns(card, [r"location", r"address", r"موقع", r"حي"])
 
                         # Area
                         area_sqm = 0.0
-                        for amenity in card.find_all("div", class_=re.compile(r"aminit|amenity|aminities")):
-                            t = amenity.get_text()
-                            if "m²" in t or "م²" in t or "متر" in t:
-                                area_sqm = _parse_area(t)
+                        area_text = _find_text_by_patterns(card, [r"area", r"size", r"مساح"])
+                        if area_text:
+                            area_sqm = _parse_area(area_text)
+                        # Also scan all text nodes for m² pattern
+                        if not area_sqm:
+                            for t in card.find_all(string=re.compile(r"م²|m²|متر")):
+                                area_sqm = _parse_area(str(t))
+                                if area_sqm:
+                                    break
 
                         if price and not (PRICE_MIN <= price <= PRICE_MAX):
                             continue
@@ -164,6 +244,41 @@ class Scraper(BaseSource):
 
         logger.info(f"[sakan] done — {len(all_items)} new listings")
         return all_items
+
+    def _parse_next_data(self, nd: dict) -> list[dict]:
+        """Extract listings from __NEXT_DATA__ JSON (Next.js pages router)."""
+        results = []
+        try:
+            page_props = nd.get("props", {}).get("pageProps", {})
+            # Try multiple common paths
+            listings = (
+                page_props.get("listings") or
+                page_props.get("properties") or
+                page_props.get("data", {}).get("listings") or
+                page_props.get("initialData", {}).get("listings") or
+                []
+            )
+            for item in listings:
+                prop = item.get("property") or item
+                pid = str(prop.get("id") or prop.get("listingId") or "")
+                if not pid:
+                    continue
+                price_obj = prop.get("price") or {}
+                price = float(price_obj.get("value") or price_obj if isinstance(price_obj, (int, float)) else 0)
+                loc = prop.get("location") or prop.get("address") or ""
+                if isinstance(loc, dict):
+                    loc = loc.get("name") or loc.get("ar") or ""
+                results.append({
+                    "ref_id": pid,
+                    "title": prop.get("title") or "عقار للبيع",
+                    "price": price,
+                    "location": str(loc),
+                    "area_sqm": float(prop.get("area") or prop.get("size") or 0),
+                    "url": f"{_BASE}/ar/property/{pid}",
+                })
+        except Exception as e:
+            logger.debug(f"[sakan] next-data parse error: {e}")
+        return results
 
     def normalize(self, raw: dict) -> dict:
         location = raw.get("location", "")
