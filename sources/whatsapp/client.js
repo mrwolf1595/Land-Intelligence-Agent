@@ -90,7 +90,22 @@ function initializeWhatsApp() {
 
             console.log(`[${groupName}] ${senderName}: ${msg.body.slice(0, 80)}...`);
 
-            await axios.post(PYTHON_BRIDGE_URL, payload, { timeout: 5000 });
+            // Retry up to 3 times with 2-second backoff so transient bridge
+            // startup delays (bridge isn't ready yet) don't lose messages.
+            let sent = false;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    await axios.post(PYTHON_BRIDGE_URL, payload, { timeout: 15000 });
+                    sent = true;
+                    break;
+                } catch (retryErr) {
+                    if (attempt < 3) {
+                        await new Promise(r => setTimeout(r, 2000 * attempt));
+                    } else {
+                        throw retryErr;
+                    }
+                }
+            }
 
         } catch (e) {
             console.error('Message processing error:', e.message);

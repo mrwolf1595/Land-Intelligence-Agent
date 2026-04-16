@@ -38,15 +38,23 @@ MATCH_SYSTEM = """أنت وسيط عقاري خبير.
 
 
 def run_matching() -> list[dict]:
-    requests = get_unmatched("request", limit=30)
-    offers = get_unmatched("offer", limit=50)
+    # Keep limits low so each cycle finishes well within the 10-minute window.
+    # With Ollama taking ~1-3s per call: 10 req × 20 offers = max 200 calls ≈ 3-10 min.
+    requests = get_unmatched("request", limit=10)
+    offers   = get_unmatched("offer",   limit=20)
 
     if not requests or not offers:
         return []
 
     new_matches = []
+    import time as _time
+    _cycle_start = _time.time()
+    _MAX_CYCLE_SEC = 480  # hard stop at 8 min to leave room for next cycle
 
     for req in requests:
+        if _time.time() - _cycle_start > _MAX_CYCLE_SEC:
+            logger.warning("Matching cycle hit time budget — stopping early")
+            break
         best_score = 0
         best_match = None
 

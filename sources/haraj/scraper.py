@@ -10,6 +10,7 @@ Strategy
 * Fetch ``https://haraj.com.sa/tags/اراضي-للبيع-في-{city}/`` for each target city.
 * Also fetch the national ``اراضي-للبيع`` tag as a catch-all.
 * Parse the turbo-stream flat-array format to reconstruct the posts list.
+* If the SSR format changes, fall back to BeautifulSoup HTML card parsing.
 * Normalise to the project schema (listing_id, city, area_sqm, price_sar, …).
 
 Yield   : ~95–130 unique land listings across Saudi Arabia per run.
@@ -72,18 +73,28 @@ def _extract_turbo_array(html: str) -> Optional[list]:
         <script>
             window.__reactRouterContext.streamController.enqueue("[ … JSON … ]");
         </script>
+
+    IMPORTANT: the inner value is a JS string literal, so any embedded quote
+    chars are escaped as \\".  We must use a pattern that handles escape
+    sequences correctly (``[^"\\\\]|\\\\.`` idiom) instead of naive ``.*?``.
     """
     scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL)
     for s in scripts:
-        if "streamController" not in s or "enqueue" not in s or len(s) < 2000:
+        if "streamController" not in s or "enqueue" not in s:
             continue
-        m = re.search(r'streamController\.enqueue\((".*?")\)', s, re.DOTALL)
+        # Handle escaped characters inside the JS string literal properly
+        m = re.search(
+            r'streamController\.enqueue\((\"(?:[^\"\\]|\\.)*\")\)',
+            s,
+            re.DOTALL,
+        )
         if not m:
             continue
         try:
             inner = json.loads(m.group(1))  # unescape JS string → JSON string
             return json.loads(inner)         # parse flat array
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"[haraj] turbo-stream parse error: {exc}")
             continue
     return None
 
@@ -147,6 +158,69 @@ def _extract_posts(arr: list) -> list[dict]:
             seen_ids.add(pid)
             posts.append(post)
 
+    return posts
+
+
+# ── BeautifulSoup HTML fallback ───────────────────────────────────────────────
+
+def _extract_posts_html(html: str) -> list[dict]:
+    """
+    Fallback parser: scan the rendered HTML for post cards when the
+    turbo-stream payload isn't available (Haraj layout update, etc.).
+    Returns minimal dicts with keys: id, title, city, price, bodyTEXT, URL.
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    posts = []
+    seen_ids: set[str] = set()
+
+    # Haraj post cards carry a data-post-id or are <article> / <div> with href
+    for card in soup.find_all(["article", "div"], attrs={"data-post-id": True}):
+        pid_str = card.get("data-post-id", "")
+        if not pid_str or pid_str in seen_ids:
+            continue
+        seen_ids.add(pid_str)
+
+        title_el = card.find(["h2", "h3", "a"])
+        title = title_el.get_text(strip=True) if title_el else ""
+
+        body_el = card.find("p")
+        body = body_el.get_text(strip=True) if body_el else ""
+
+        link_el = card.find("a", href=True)
+        url = link_el["href"] if link_el else ""
+        if url and not url.startswith("http"):
+            url = f"{_BASE}/{url.lstrip('/')}"
+
+        price_el = card.find(string=re.compile(r"\d[\d,\.]+"))
+        price = 0.0
+        if price_el:
+            nums = re.findall(r"[\d,]+", str(price_el))
+            if nums:
+                try:
+                    price = float(nums[0].replace(",", ""))
+                except ValueError:
+                    pass
+
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            continue
+
+        posts.append({
+            "id": pid,
+            "title": title,
+            "bodyTEXT": body,
+            "price": price,
+            "URL": url,
+            "city": "",
+        })
+
+    logger.info(f"[haraj] HTML fallback: {len(posts)} post cards found")
     return posts
 
 
@@ -221,13 +295,21 @@ class Scraper(BaseSource):
                     time.sleep(1.0)
                     continue
 
+                # Primary: turbo-stream SSR extraction
                 arr = _extract_turbo_array(resp.text)
-                if arr is None:
-                    logger.warning(f"Haraj [{label}]: no turbo-stream data found")
+                if arr is not None:
+                    posts = _extract_posts(arr)
+                    logger.debug(f"[haraj] [{label}]: turbo-stream gave {len(posts)} posts")
+                else:
+                    # Fallback: BeautifulSoup HTML card parsing
+                    logger.info(f"[haraj] [{label}]: turbo-stream not found — trying HTML fallback")
+                    posts = _extract_posts_html(resp.text)
+
+                if not posts:
+                    logger.warning(f"Haraj [{label}]: no posts extracted from page")
                     time.sleep(1.0)
                     continue
 
-                posts = _extract_posts(arr)
                 new_count = 0
                 consecutive_known = 0
                 stop_early = False
@@ -239,7 +321,9 @@ class Scraper(BaseSource):
 
                     city = post.get("city") or post.get("geoCity") or ""
                     if not _city_in_targets(city):
-                        continue
+                        # For national tag keep posts even without city (city may be in body)
+                        if label != "national":
+                            continue
 
                     price_raw = post.get("price")
                     price = float(price_raw) if isinstance(price_raw, (int, float)) and price_raw > 0 else 0.0
@@ -267,7 +351,7 @@ class Scraper(BaseSource):
                     continue
 
             except Exception as exc:
-                logger.error(f"Haraj [{label}] error: {exc}")
+                logger.error(f"Haraj [{label}] error: {exc}", exc_info=True)
 
             time.sleep(1.0)
 
