@@ -2,11 +2,12 @@
 Wasalt.sa real estate scraper.
 
 Strategy:
-1. Try HTTP scraping: attempt several known URL patterns, extract __NEXT_DATA__ JSON.
+1. curl_cffi with Chrome TLS impersonation — bypasses Cloudflare JS challenge.
+   Fetches /sale/search pages, extracts __NEXT_DATA__ JSON.
    Filter for land sub-types (أرض / أرض متعددة الاستخدام / أرض تجارية).
-   Stop early when 15+ consecutive listings already exist in DB.
-2. If HTTP returns 403 or yields no __NEXT_DATA__: fall back to Selenium.
-3. If Selenium unavailable: fall back to legacy SQLite adapter (WASALT_DB_PATH).
+2. httpx fallback if curl_cffi not installed.
+3. Selenium fallback if both HTTP methods fail.
+4. Legacy SQLite fallback as last resort.
 """
 import json
 import os
@@ -17,7 +18,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import httpx
+try:
+    import curl_cffi.requests as _cffi_req
+    _HAS_CFFI = True
+except ImportError:
+    _HAS_CFFI = False
+    import httpx
 
 from config import TARGET_CITIES, PRICE_MIN, PRICE_MAX, WASALT_DB_PATH
 from core.logger import get_logger
@@ -29,12 +35,12 @@ logger = get_logger("wasalt")
 _BASE       = "https://wasalt.sa"
 _EARLY_STOP = 15   # stop after N consecutive known listings
 
-# Multiple URL patterns to try in order (Wasalt has changed their URL structure)
+# URL patterns to try in order (most reliable first)
 _SEARCH_URLS = [
-    f"{_BASE}/sa-en/residential-lands-for-sale",
+    f"{_BASE}/sale/search",                            # ✅ confirmed working with curl_cffi
     f"{_BASE}/sale/search?type=residential&subType=land",
-    f"{_BASE}/sale/search",
     f"{_BASE}/sa-ar/properties-for-sale",
+    f"{_BASE}/sa-en/residential-lands-for-sale",
 ]
 
 _MAX_PAGES = 15
@@ -160,22 +166,39 @@ class Scraper(BaseSource):
     def _fetch_web(self) -> Optional[list[dict]]:
         """
         Try each search URL pattern in order.
-        Returns list of raw property dicts, or None if all URLs are blocked/fail.
+        Uses curl_cffi (Chrome TLS impersonation) to bypass Cloudflare.
+        Falls back to httpx if curl_cffi is unavailable.
+        Returns list of raw property dicts, or None if all URLs fail.
         """
-        with httpx.Client(headers=_HEADERS, timeout=30, follow_redirects=True) as client:
+        if _HAS_CFFI:
+            logger.info("[wasalt] Using curl_cffi (Chrome impersonation) to bypass Cloudflare")
+            session = _cffi_req.Session()
+            get_fn = lambda url: session.get(url, impersonate="chrome110", timeout=30)
+        else:
+            logger.warning("[wasalt] curl_cffi not available — falling back to httpx (may be blocked)")
+            _client = httpx.Client(headers=_HEADERS, timeout=30, follow_redirects=True)
+            get_fn = lambda url: _client.get(url)
+
+        try:
             for base_url in _SEARCH_URLS:
-                result = self._try_url_pattern(client, base_url)
+                result = self._try_url_pattern(get_fn, base_url)
                 if result is not None:
                     return result
                 logger.info(f"[wasalt] URL pattern {base_url!r} failed — trying next")
+        finally:
+            if _HAS_CFFI:
+                session.close()
+            else:
+                _client.close()
 
         logger.warning("[wasalt] All HTTP URL patterns failed")
         return None
 
-    def _try_url_pattern(self, client, base_url: str) -> Optional[list[dict]]:
+    def _try_url_pattern(self, get_fn, base_url: str) -> Optional[list[dict]]:
         """
         Paginate through a URL pattern.
-        Returns list (possibly empty) on success, None if blocked (403).
+        get_fn: callable(url) -> response object
+        Returns list (possibly empty) on success, None if blocked/failed.
         """
         all_items: list[dict] = []
         seen_ids:  set[str]   = set()
@@ -185,7 +208,7 @@ class Scraper(BaseSource):
             sep = "&" if "?" in base_url else "?"
             url = f"{base_url}{sep}page={page}"
             try:
-                resp = client.get(url)
+                resp = get_fn(url)
             except Exception as exc:
                 logger.error(f"[wasalt] {url} request error: {exc}")
                 return None if page == 0 else all_items
