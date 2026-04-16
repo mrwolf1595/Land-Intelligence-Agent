@@ -11,7 +11,18 @@
       "Bash(.venv/Scripts/python.exe -c \"import ollama; print\\(ollama.__version__\\)\")",
       "Bash(.venv/Scripts/pip show:*)",
       "mcp__Claude_in_Chrome__find",
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Bash(cat \"K:/Projects/land-agent/agents/\"*)",
+      "Bash(python3 -c ':*)",
+      "Bash(python main.py --mode reprocess)",
+      "Bash(sed -i 's/_EARLY_STOP = 10/_EARLY_STOP = 30/g' sources/haraj/scraper.py sources/propertyfinder/scraper.py)",
+      "Bash(sed -i 's/^_EARLY_STOP = 10$/_EARLY_STOP = 30/' sources/aqar/scraper.py)",
+      "Bash(sed -i 's/_EARLY_STOP = 15.*/_EARLY_STOP = 30   # stop after N consecutive known listings/' sources/wasalt/scraper.py)",
+      "Bash(ls \"K:\\\\Projects\\\\Land Intelligence Agent\"/*.sh)",
+      "Bash(.venv/Scripts/python.exe -c \"import httpx; print\\('ok'\\)\")",
+      "Bash(python -c \"import sys; [print\\(l\\) for l in sys.stdin.buffer.read\\(\\).decode\\('utf-8','replace'\\).splitlines\\(\\)]\")",
+      "Bash(.venv/Scripts/python.exe -c \"import curl_cffi; print\\('curl_cffi ok', curl_cffi.__version__\\)\")",
+      "Bash(.venv/Scripts/pip.exe install:*)"
     ]
   }
 }
