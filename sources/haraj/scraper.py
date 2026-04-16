@@ -241,6 +241,50 @@ def _area_from_text(text: str) -> float:
     return 0.0
 
 
+def _price_from_text(text: str, area_sqm: float = 0.0) -> float:
+    """Extract price in SAR from Arabic free-text body.
+
+    Patterns tried (first match wins, except pattern 3 uses largest):
+      1. Explicit label:   السعر: 960,000 ريال
+      2. Million shorthand: 1.5 مليون
+      3. Riyal / SAR suffix: 960,000 ريال  (largest number wins)
+      4. Per-m² unit price: سعر الوحدة 7  → 7 × area_sqm
+    """
+    if not text:
+        return 0.0
+
+    # Pattern 1: labelled price  السعر: 960,000  or  سعر الأرض: 960,000
+    m = re.search(r"(?:السعر|سعر[^:]*?)\s*[:：]\s*([\d,\.]+)", text)
+    if m:
+        val = float(m.group(1).replace(",", ""))
+        if val > 100:          # sanity: must be > 100 SAR
+            return val
+
+    # Pattern 2: مليون (million)
+    m = re.search(r"([\d\.]+)\s*مليون", text)
+    if m:
+        val = float(m.group(1).replace(",", "")) * 1_000_000
+        if val >= 100_000:
+            return val
+
+    # Pattern 3: number followed by ريال or SAR — take the largest
+    matches_rial = re.findall(r"([\d,]+)\s*(?:ريال|SAR)", text)
+    if matches_rial:
+        vals = [float(x.replace(",", "")) for x in matches_rial]
+        best = max(vals)
+        if best > 100:
+            return best
+
+    # Pattern 4: per-m² unit price × area
+    m = re.search(r"سعر الوحدة\s*[:：]?\s*([\d,\.]+)", text)
+    if m and area_sqm > 0:
+        per_sqm = float(m.group(1).replace(",", ""))
+        if per_sqm > 0:
+            return per_sqm * area_sqm
+
+    return 0.0
+
+
 def _city_slug(city: str) -> str:
     return _CITY_SLUG.get(city, city)
 
@@ -382,6 +426,10 @@ class Scraper(BaseSource):
 
                     price_raw = post.get("price")
                     price = float(price_raw) if isinstance(price_raw, (int, float)) and price_raw > 0 else 0.0
+                    if not price:
+                        body = post.get("bodyTEXT") or ""
+                        area_hint = _area_from_text(body)
+                        price = _price_from_text(body, area_hint)
                     if price and not (PRICE_MIN <= price <= PRICE_MAX):
                         continue
 
@@ -436,6 +484,8 @@ class Scraper(BaseSource):
 
         price_raw = raw.get("price")
         price_sar = float(price_raw) if isinstance(price_raw, (int, float)) and price_raw > 0 else 0.0
+        if not price_sar:
+            price_sar = _price_from_text(body, area)
 
         return {
             "listing_id":    f"haraj_{raw.get('id', '')}",

@@ -96,7 +96,7 @@ with tab2:
     st.subheader("فرص الأراضي المحللة")
     conn = get_conn()
     rows = conn.execute(
-        "SELECT * FROM opportunities WHERE processed=1 ORDER BY created_at DESC LIMIT 50"
+        "SELECT * FROM opportunities WHERE processed=1 AND duplicate_of IS NULL ORDER BY created_at DESC LIMIT 50"
     ).fetchall()
     conn.close()
 
@@ -110,7 +110,9 @@ with tab2:
             fin = json.loads(o["financial"] or "{}") if o["financial"] else {}
             score = analysis.get("opportunity_score", 0)
             roi = fin.get("roi_pct", 0)
-            with st.expander(f"📍 {o['title']} — Score: {score}/10 | ROI: {roi}%"):
+            confidence = o.get("confidence") or "LOW"
+            conf_badge = {"HIGH": "🟢", "MEDIUM": "🟡", "LOW": "🔴"}.get(confidence, "🔴")
+            with st.expander(f"📍 {o['title']} — Score: {score}/10 | ROI: {roi}% {conf_badge} {confidence}"):
                 c1, c2, c3 = st.columns(3)
                 c1.metric("سعر الأرض", f"{o['price_sar']:,.0f} ر.س" if o["price_sar"] else "—")
                 c2.metric("صافي الربح", f"{fin.get('gross_profit_sar', 0):,.0f} ر.س")

@@ -60,6 +60,13 @@ def run_scraping_cycle():
             f"last: {(s['last_seen'] or '')[:16]}"
         )
 
+    # ── Post-scrape housekeeping ──────────────────────────────────────────────
+    from core.dedup import mark_duplicates
+    mark_duplicates()
+
+    from pipeline.benchmarks import rebuild_benchmarks
+    rebuild_benchmarks()
+
 
 def _process_land_opportunity(listing: dict):
     """Full pipeline for a scraped land: analyze → ROI → mockup → PDF → DB → notify."""

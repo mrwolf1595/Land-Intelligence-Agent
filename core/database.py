@@ -87,10 +87,26 @@ def init_db():
     existing = {r[1] for r in conn.execute("PRAGMA table_info(opportunities)").fetchall()}
     migrations = [
         ("contact_name", "ALTER TABLE opportunities ADD COLUMN contact_name TEXT"),
+        ("duplicate_of", "ALTER TABLE opportunities ADD COLUMN duplicate_of TEXT DEFAULT NULL"),
+        ("confidence", "ALTER TABLE opportunities ADD COLUMN confidence TEXT DEFAULT 'LOW'"),
     ]
     for col, sql in migrations:
         if col not in existing:
             conn.execute(sql)
+    conn.commit()
+
+    # ── Price benchmarks table ───────────────────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS price_benchmarks (
+            city TEXT NOT NULL,
+            district TEXT NOT NULL DEFAULT '',
+            avg_price_per_sqm REAL,
+            median_price_per_sqm REAL,
+            sample_count INTEGER,
+            last_updated TEXT,
+            PRIMARY KEY (city, district)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -218,18 +234,21 @@ def listing_exists(listing_id: str) -> bool:
 
 def update_opportunity_analysis(lid: str, analysis: dict, financial: dict, pdf_path: str = None):
     """Persist Ollama analysis + ROI results back to the opportunity row."""
+    confidence = analysis.get("confidence", "LOW")
     conn = get_conn()
     conn.execute("""
         UPDATE opportunities
-        SET analysis  = ?,
-            financial = ?,
-            pdf_path  = ?,
-            processed = 1
+        SET analysis   = ?,
+            financial  = ?,
+            pdf_path   = ?,
+            confidence = ?,
+            processed  = 1
         WHERE id = ?
     """, (
         json.dumps(analysis,  ensure_ascii=False),
         json.dumps(financial, ensure_ascii=False),
         pdf_path,
+        confidence,
         lid,
     ))
     conn.commit()
