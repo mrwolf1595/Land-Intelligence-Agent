@@ -1,12 +1,15 @@
 """
-Wasalt.sa real estate scraper.
+Wasalt.sa real estate scraper v2.
 
-Strategy:
-1. Try HTTP scraping: GET /sale/search?page=N, extract __NEXT_DATA__ JSON embedded in HTML.
-   Filter for land sub-types (أرض / أرض متعددة الاستخدام / أرض تجارية).
-   Stop early when 15+ consecutive listings already exist in DB.
-2. If HTTP returns 403 (bot-blocked): fall back to existing SQLite adapter.
+Improved strategies to handle 403 bot protection:
+  1. HTTP with enhanced anti-bot headers and cookie persistence
+  2. Alternative mobile-style API endpoint
+  3. Selenium fallback (headless Firefox on Linux)
+  4. SQLite database fallback (read-only)
+
+Filters for land sub-types across Saudi TARGET_CITIES.
 """
+
 import json
 import os
 import re
@@ -27,28 +30,45 @@ logger = get_logger("wasalt")
 
 _BASE       = "https://wasalt.sa"
 _SEARCH_URL = f"{_BASE}/sale/search"
+_API_URL    = f"{_BASE}/api/v1/properties/search"
 _MAX_PAGES  = 15
-_EARLY_STOP = 15   # stop after N consecutive known listings
+_EARLY_STOP = 15
 
-_HEADERS = {
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+_UAS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+]
+
+_HEADERS_BROWSER = {
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "ar,en;q=0.7,en-US;q=0.3",
+    "Accept-Encoding": "gzip, deflate, br",
+    "User-Agent":      _UAS[0],
+    "Referer":         "https://wasalt.sa/",
+    "Sec-Fetch-Dest":  "document",
+    "Sec-Fetch-Mode":  "navigate",
+    "Sec-Fetch-Site":  "same-origin",
+    "Sec-Ch-Ua":       '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Cache-Control":   "no-cache",
+    "Connection":      "keep-alive",
+}
+
+_HEADERS_API = {
+    "Accept":          "application/json, text/plain, */*",
     "Accept-Language": "ar,en;q=0.7",
     "Accept-Encoding": "gzip, deflate, br",
-    "User-Agent":      (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Referer":          "https://wasalt.sa/",
-    "Sec-Fetch-Dest":   "document",
-    "Sec-Fetch-Mode":   "navigate",
-    "Sec-Fetch-Site":   "same-origin",
-    "Cache-Control":    "no-cache",
+    "User-Agent":      _UAS[2],
+    "Referer":         "https://wasalt.sa/ar",
+    "Origin":          "https://wasalt.sa",
+    "X-Requested-With": "XMLHttpRequest",
 }
 
 _LAND_TYPES = {"أرض", "أرض متعددة الاستخدام", "أرض تجارية"}
 
-_CITY_ALIASES: dict[str, list[str]] = {
+_CITY_ALIASES = {
     "الرياض":       ["الرياض", "riyadh"],
     "جدة":          ["جدة", "جده", "jeddah"],
     "مكة":          ["مكة", "مكه", "مكة المكرمة", "makkah", "mecca"],
@@ -58,28 +78,34 @@ _CITY_ALIASES: dict[str, list[str]] = {
     "القصيم":       ["القصيم", "بريدة", "qassim"],
     "تبوك":         ["تبوك", "tabuk"],
     "حائل":         ["حائل", "hail"],
-    "الأحساء":      ["الأحساء", "ahsa", "al ahsa"],
+    "الأحساء":      ["الأحساء", "ahsa"],
     "أبها":         ["أبها", "abha"],
     "خميس مشيط":   ["خميس مشيط", "khamis mushait"],
 }
 
 
 def _extract_next_data(html: str) -> Optional[dict]:
-    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>', html, re.DOTALL)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1))
-    except Exception:
-        return None
+    for pattern in [
+        r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
+        r'<script[^>]*>self\.__next_f\.push\(\[1,"(.+?)"\]\)</script>',
+    ]:
+        m = re.search(pattern, html, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(1))
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, TypeError):
+                continue
+    return None
 
 
 def _city_matches(city: str) -> bool:
     if not city:
         return False
-    city_lower = city.lower().strip()
-    for aliases in _CITY_ALIASES.values():
-        if any(a.lower() in city_lower or city_lower in a.lower() for a in aliases):
+    c = city.lower().strip()
+    for canonical, aliases in _CITY_ALIASES.items():
+        if any(a.lower() in c or c in a.lower() for a in aliases):
             return True
     return False
 
@@ -87,9 +113,9 @@ def _city_matches(city: str) -> bool:
 def _normalize_city(city: str) -> str:
     if not city:
         return "غير محدد"
-    city_lower = city.lower().strip()
+    c = city.lower().strip()
     for canonical, aliases in _CITY_ALIASES.items():
-        if any(a.lower() in city_lower or city_lower in a.lower() for a in aliases):
+        if any(a.lower() in c or c in a.lower() for a in aliases):
             return canonical
     return city
 
@@ -97,38 +123,131 @@ def _normalize_city(city: str) -> str:
 class Scraper(BaseSource):
     name = "wasalt"
 
+    def __init__(self):
+        self._session_cookies = {}
+
     def fetch(self) -> list[dict]:
-        items = self._fetch_web()
-        if items is not None:          # None = blocked; [] = ran but found nothing new
+        items = self._fetch_api()
+        if items is not None:
             return items
-        # httpx blocked — try Selenium
+
+        items = self._fetch_web()
+        if items is not None:
+            return items
+
         items = self._fetch_selenium()
         if items is not None:
             return items
-        # Selenium not available — SQLite fallback
+
         logger.warning("[wasalt] All web methods failed — falling back to SQLite")
         return self._fetch_sqlite()
 
-    # ── Web scraper ────────────────────────────────────────────────────────────
-
-    def _fetch_web(self) -> Optional[list[dict]]:
-        """Returns list of raw property dicts, or None if HTTP blocked."""
-        all_items: list[dict] = []
-        seen_ids:  set[str]   = set()
+    def _fetch_api(self) -> Optional[list[dict]]:
+        """Try the JSON API endpoint first (fastest, least likely to be blocked)."""
+        all_items = []
+        seen = set()
         consecutive_known = 0
 
-        with httpx.Client(headers=_HEADERS, timeout=30, follow_redirects=True) as client:
+        with httpx.Client(headers=_HEADERS_API, timeout=30, follow_redirects=True) as client:
+            for page in range(_MAX_PAGES):
+                params = {
+                    "page": page,
+                    "per_page": "50",
+                    "propertyFor": "sale",
+                    "countryId": "1",
+                    "type": "residential",
+                }
+                try:
+                    resp = client.get(_API_URL, params=params)
+                    if resp.status_code in (401, 403):
+                        logger.info(f"[wasalt] API returned {resp.status_code} — endpoint may not exist")
+                        return None
+                    if resp.status_code != 200:
+                        logger.debug(f"[wasalt] API page {page}: HTTP {resp.status_code}")
+                        break
+                    data = resp.json()
+                except Exception as exc:
+                    logger.debug(f"[wasalt] API error: {exc}")
+                    return None
+
+                props = (
+                    data.get("data", {}).get("properties") or
+                    data.get("data", {}).get("listings") or
+                    data.get("properties") or
+                    data.get("listings") or []
+                )
+                if not props:
+                    break
+
+                new_on_page = 0
+                for prop in props:
+                    if not isinstance(prop, dict):
+                        continue
+                    info = prop.get("propertyInfo") or prop
+                    if not isinstance(info, dict):
+                        info = prop
+                    sub_type = info.get("propertySubType") or info.get("type") or ""
+                    if sub_type and sub_type not in _LAND_TYPES:
+                        continue
+
+                    eid = str(prop.get("id") or prop.get("externalID") or "")
+                    if not eid or eid in seen:
+                        continue
+                    seen.add(eid)
+
+                    lid = f"wasalt_{eid}"
+                    if listing_exists(lid):
+                        consecutive_known += 1
+                        if consecutive_known >= _EARLY_STOP:
+                            return all_items
+                        continue
+                    consecutive_known = 0
+
+                    price = float(info.get("salePrice") or info.get("conversionPrice") or info.get("price") or 0)
+                    if price and not (PRICE_MIN <= price <= PRICE_MAX):
+                        continue
+
+                    city = info.get("city") or ""
+                    if TARGET_CITIES and not _city_matches(city):
+                        continue
+
+                    all_items.append(prop)
+                    new_on_page += 1
+
+                logger.info(f"[wasalt] API page {page}: {new_on_page} new listings")
+
+                if consecutive_known >= _EARLY_STOP:
+                    return all_items
+
+                if len(props) < 50:
+                    break
+                time.sleep(0.8)
+
+        logger.info(f"[wasalt] API done — {len(all_items)} new listings")
+        return all_items if all_items else None
+
+    def _fetch_web(self) -> Optional[list[dict]]:
+        """HTTP scraping with enhanced headers and cookie persistence."""
+        all_items = []
+        seen = set()
+        consecutive_known = 0
+
+        with httpx.Client(headers=_HEADERS_BROWSER, timeout=30, follow_redirects=True) as client:
             for page in range(_MAX_PAGES):
                 url = f"{_SEARCH_URL}?page={page}"
+                headers = dict(_HEADERS_BROWSER)
+                headers["User-Agent"] = _UAS[page % len(_UAS)]
+
                 try:
-                    resp = client.get(url)
+                    resp = client.get(url, headers=headers, cookies=self._session_cookies)
+                    self._session_cookies.update(dict(resp.cookies))
                 except Exception as exc:
                     logger.error(f"[wasalt] page {page} request error: {exc}")
                     break
 
                 if resp.status_code == 403:
                     logger.warning(f"[wasalt] HTTP 403 on page {page}")
-                    return None   # Signal "blocked"
+                    return None
 
                 if resp.status_code != 200:
                     logger.warning(f"[wasalt] page {page}: HTTP {resp.status_code}")
@@ -141,30 +260,36 @@ class Scraper(BaseSource):
 
                 props = (
                     nd.get("props", {})
-                      .get("pageProps", {})
-                      .get("searchResult", {})
-                      .get("properties", [])
+                    .get("pageProps", {})
+                    .get("searchResult", {})
+                    .get("properties") or
+                    nd.get("props", {})
+                    .get("pageProps", {})
+                    .get("properties") or []
                 )
                 if not props:
                     break
 
                 new_on_page = 0
                 for prop in props:
+                    if not isinstance(prop, dict):
+                        continue
                     info = prop.get("propertyInfo") or {}
+                    if not isinstance(info, dict):
+                        info = {}
                     sub_type = info.get("propertySubType", "")
-                    if sub_type not in _LAND_TYPES:
+                    if sub_type and sub_type not in _LAND_TYPES:
                         continue
 
                     eid = str(prop.get("id", ""))
-                    if not eid or eid in seen_ids:
+                    if not eid or eid in seen:
                         continue
-                    seen_ids.add(eid)
+                    seen.add(eid)
 
                     lid = f"wasalt_{eid}"
                     if listing_exists(lid):
                         consecutive_known += 1
                         continue
-
                     consecutive_known = 0
 
                     price = float(info.get("salePrice") or info.get("conversionPrice") or 0)
@@ -178,7 +303,7 @@ class Scraper(BaseSource):
                     all_items.append(prop)
                     new_on_page += 1
 
-                logger.info(f"[wasalt] page {page}: {new_on_page} new land listings")
+                logger.info(f"[wasalt] web page {page}: {new_on_page} new listings")
 
                 if consecutive_known >= _EARLY_STOP:
                     logger.info(f"[wasalt] {_EARLY_STOP} consecutive known — stopping early")
@@ -187,12 +312,10 @@ class Scraper(BaseSource):
                 time.sleep(1.0)
 
         logger.info(f"[wasalt] web done — {len(all_items)} new listings")
-        return all_items
-
-    # ── Selenium fallback ─────────────────────────────────────────────────────
+        return all_items if all_items else None
 
     def _fetch_selenium(self) -> Optional[list[dict]]:
-        """Try Selenium-based scraping (Kali Linux with geckodriver)."""
+        """Selenium fallback (headless Firefox)."""
         try:
             from selenium import webdriver
             from selenium.webdriver.firefox.service import Service
@@ -214,7 +337,7 @@ class Scraper(BaseSource):
         options = Options()
         options.add_argument("--headless")
         options.add_argument("--no-sandbox")
-        options.set_preference("permissions.default.image", 2)  # disable images
+        options.set_preference("permissions.default.image", 2)
 
         try:
             driver = webdriver.Firefox(service=Service(GECKO), options=options)
@@ -223,7 +346,7 @@ class Scraper(BaseSource):
             return None
 
         all_items = []
-        seen_ids: set = set()
+        seen = set()
         consecutive_known = 0
 
         try:
@@ -253,9 +376,9 @@ class Scraper(BaseSource):
                     if info.get("propertySubType") not in _LAND_TYPES:
                         continue
                     eid = str(prop.get("id", ""))
-                    if not eid or eid in seen_ids:
+                    if not eid or eid in seen:
                         continue
-                    seen_ids.add(eid)
+                    seen.add(eid)
                     lid = f"wasalt_{eid}"
                     if listing_exists(lid):
                         consecutive_known += 1
@@ -272,16 +395,13 @@ class Scraper(BaseSource):
 
                 logger.info(f"[wasalt] Selenium page {page}: {new_on_page} new")
                 if consecutive_known >= _EARLY_STOP:
-                    logger.info("[wasalt] Early stop (consecutive known)")
                     break
                 time.sleep(2.0)
         finally:
             driver.quit()
 
         logger.info(f"[wasalt] Selenium done — {len(all_items)} new listings")
-        return all_items
-
-    # ── SQLite fallback ────────────────────────────────────────────────────────
+        return all_items if all_items else None
 
     def _fetch_sqlite(self) -> list[dict]:
         import sqlite3
@@ -301,8 +421,6 @@ class Scraper(BaseSource):
             logger.error(f"[wasalt] SQLite error: {e}")
             return []
 
-    # ── Normalization ──────────────────────────────────────────────────────────
-
     def normalize(self, raw: dict) -> dict:
         if raw.get("_sqlite"):
             return {
@@ -319,8 +437,7 @@ class Scraper(BaseSource):
                 "scraped_at":    datetime.now(),
             }
 
-        # Web scraper path
-        info     = raw.get("propertyInfo") or {}
+        info    = raw.get("propertyInfo") or {}
         prop_id  = str(raw.get("id", ""))
         slug     = info.get("slug", "")
         url      = f"{_BASE}/property/sale/{slug}" if slug else f"{_BASE}/property/{prop_id}"
@@ -331,7 +448,7 @@ class Scraper(BaseSource):
             "title":         info.get("title", "أرض للبيع"),
             "city":          _normalize_city(info.get("city", "")),
             "district":      info.get("zone") or info.get("territory", ""),
-            "area_sqm":      float(raw.get("floorSize") or 0),
+            "area_sqm":      float(raw.get("floorSize") or info.get("area") or 0),
             "price_sar":     float(info.get("salePrice") or info.get("conversionPrice") or 0),
             "contact_phone": None,
             "image_urls":    "",

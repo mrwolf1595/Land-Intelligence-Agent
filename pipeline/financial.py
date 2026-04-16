@@ -4,9 +4,9 @@ Rule-based logic for testing ROI of a land opportunity.
 from config import CONSTRUCTION_COST, SELL_PRICE, FAR, UNIT_SIZE_SQM
 
 def calculate_roi(analysis: dict) -> dict:
-    land_price = float(analysis.get("asking_price_sar", 0))
-    area_sqm = float(analysis.get("land_area_sqm", 0) or 0)
-    dev_type = analysis.get("recommended_development", "apartments").lower()
+    land_price = float(analysis.get("asking_price_sar") or 0)
+    area_sqm = float(analysis.get("land_area_sqm") or 0)
+    dev_type = (analysis.get("recommended_development") or "apartments").lower()
     
     if dev_type not in CONSTRUCTION_COST:
         dev_type = "apartments"

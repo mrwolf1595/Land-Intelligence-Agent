@@ -2,6 +2,8 @@
 Aqar.fm GraphQL scraper (sa.aqar.fm).
 Uses cloudscraper to bypass anti-bot, queries the GraphQL endpoint directly.
 Falls back to httpx if cloudscraper is not installed.
+
+API note (2025): schema changed — now uses Search.find / WhereInput.
 """
 
 import time
@@ -39,7 +41,38 @@ _HEADERS = {
     "Referer":            f"{_BASE}/",
 }
 
+# New API (2025): Search.find with WhereInput
 _FIND_LISTINGS_QUERY = """
+query Search($size: Int, $from: Int, $sort: SortInput, $where: WhereInput) {
+  Search {
+    find(size: $size, from: $from, sort: $sort, where: $where) {
+      listings {
+        id
+        area
+        price
+        city
+        district
+        title
+        path
+        uri
+        address
+        meter_price
+        user {
+          phone
+          name
+        }
+        location {
+          lat
+          lng
+        }
+      }
+    }
+  }
+}
+"""
+
+# Legacy API (fallback): direct findListings
+_FIND_LISTINGS_LEGACY = """
 query findListings($size: Int, $from: Int, $sort: SortInput, $where: ListingWhereInput) {
   findListings(size: $size, from: $from, sort: $sort, where: $where) {
     id
@@ -93,11 +126,33 @@ def _post(session, payload: dict) -> Optional[dict]:
             resp = session.post(_GQL, json=payload, timeout=30)
         else:
             resp = session.post(_GQL, json=payload)
+        if resp.status_code == 400:
+            # Log the actual error from the server for debugging
+            try:
+                err = resp.json()
+                logger.error(f"[aqar] GraphQL 400: {err.get('errors', err)}")
+            except Exception:
+                logger.error(f"[aqar] GraphQL 400: {resp.text[:300]}")
+            return None
         resp.raise_for_status()
         return resp.json()
     except Exception as exc:
         logger.error(f"[aqar] GraphQL request failed: {exc}")
         return None
+
+
+def _extract_listings(data: dict) -> list:
+    """Extract listing list from GraphQL response — handles both new and legacy schema."""
+    if not data:
+        return []
+    d = data.get("data", {})
+    # New schema: data.Search.find.listings
+    if "Search" in d:
+        return d["Search"].get("find", {}).get("listings") or []
+    # Legacy schema: data.findListings
+    if "findListings" in d:
+        return d["findListings"] or []
+    return []
 
 
 def _fetch_cities(session) -> list[dict]:
@@ -110,7 +165,8 @@ def _fetch_cities(session) -> list[dict]:
     data = _post(session, payload)
     if not data:
         return []
-    return data.get("data", {}).get("getAllCities", [])
+    d = data.get("data", {})
+    return d.get("getAllCities") or []
 
 
 def _city_matches(city_name: str) -> bool:
@@ -128,6 +184,11 @@ class Scraper(BaseSource):
         seen_ids:  set[str]   = set()
 
         session = _make_session()
+
+        # Detect which query works: new API first, fallback to legacy
+        query_to_use   = _FIND_LISTINGS_QUERY
+        op_name        = "Search"
+        use_legacy     = False
 
         try:
             # Fetch city list, then filter to TARGET_CITIES
@@ -156,8 +217,8 @@ class Scraper(BaseSource):
                         where["city_id"] = {"eq": city_id}
 
                     payload = {
-                        "operationName": "findListings",
-                        "query": _FIND_LISTINGS_QUERY,
+                        "operationName": op_name,
+                        "query": query_to_use,
                         "variables": {
                             "size": _PAGE_SIZE,
                             "from": from_offset,
@@ -167,10 +228,21 @@ class Scraper(BaseSource):
                     }
 
                     data = _post(session, payload)
+
+                    # If new API failed on first city first page, try legacy
+                    if data is None and not use_legacy and page_idx == 0 and city_obj is cities[0]:
+                        logger.info("[aqar] New API failed — retrying with legacy query")
+                        use_legacy   = True
+                        query_to_use = _FIND_LISTINGS_LEGACY
+                        op_name      = "findListings"
+                        payload["operationName"] = op_name
+                        payload["query"]         = query_to_use
+                        data = _post(session, payload)
+
                     if not data:
                         break
 
-                    listings = data.get("data", {}).get("findListings", [])
+                    listings = _extract_listings(data)
                     if not listings:
                         break
 
