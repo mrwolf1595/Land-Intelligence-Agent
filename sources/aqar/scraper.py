@@ -42,6 +42,8 @@ _HEADERS = {
 }
 
 # New API (2025): Search.find with WhereInput
+# Fields: city/district renamed to location_city/location_district,
+#         title/path renamed to content/address
 _FIND_LISTINGS_QUERY = """
 query Search($size: Int, $from: Int, $sort: SortInput, $where: WhereInput) {
   Search {
@@ -50,13 +52,12 @@ query Search($size: Int, $from: Int, $sort: SortInput, $where: WhereInput) {
         id
         area
         price
-        city
-        district
-        title
-        path
-        uri
-        address
         meter_price
+        city_id
+        location_city
+        location_district
+        content
+        address
         user {
           phone
           name
@@ -291,25 +292,40 @@ class Scraper(BaseSource):
 
     def normalize(self, raw: dict) -> dict:
         eid  = str(raw.get("id", ""))
-        path = raw.get("path") or raw.get("uri") or ""
+        # New API uses 'address' for path; legacy uses 'path' or 'uri'
+        path = raw.get("address") or raw.get("path") or raw.get("uri") or ""
         if path and not path.startswith("http"):
             source_url = f"{_BASE}{path}"
         elif path:
             source_url = path
         else:
-            source_url = ""
+            source_url = f"{_BASE}/property/{eid}" if eid else ""
 
         user = raw.get("user") or {}
+
+        # New API uses location_city/location_district; legacy uses city/district
+        city = (
+            raw.get("location_city") or
+            raw.get("city") or
+            "غير محدد"
+        )
+        district = raw.get("location_district") or raw.get("district") or ""
+        # New API uses 'content' for title; legacy uses 'title'
+        title = raw.get("content") or raw.get("title") or "أرض للبيع"
+
+        phone = user.get("phone")
+        if phone == 0:
+            phone = None
 
         return {
             "listing_id":    f"aqar_{eid}",
             "source":        self.name,
-            "title":         raw.get("title") or "أرض للبيع",
-            "city":          raw.get("city") or "غير محدد",
-            "district":      raw.get("district") or "",
+            "title":         title,
+            "city":          city,
+            "district":      district,
             "area_sqm":      float(raw.get("area") or 0),
             "price_sar":     float(raw.get("price") or 0),
-            "contact_phone": user.get("phone"),
+            "contact_phone": phone,
             "contact_name":  user.get("name"),
             "image_urls":    "",
             "source_url":    source_url,
