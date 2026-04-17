@@ -16,8 +16,9 @@ from pipeline.matcher import run_matching
 from pipeline.notifier import notify_broker_match, notify_broker_opportunity
 from pipeline.analyzer import analyze_land
 from pipeline.mockup import generate_mockup
-from pipeline.financial import calculate_roi
+from pipeline.financial import calculate_roi, calculate_roi_scenarios
 from pipeline.proposal import generate_proposal
+from pipeline.red_flags import detect_red_flags, has_blocking_flags, format_flags_arabic
 from config import FEATURES, ENABLED_SOURCES, MIN_OPPORTUNITY_SCORE, validate_config
 
 logger = get_logger("main")
@@ -69,7 +70,7 @@ def run_scraping_cycle():
 
 
 def _process_land_opportunity(listing: dict):
-    """Full pipeline for a scraped land: analyze → ROI → mockup → PDF → DB → notify."""
+    """Full pipeline for a scraped land: analyze → red flags → ROI → mockup → PDF → DB → notify."""
     lid = str(listing.get("listing_id", ""))
     if not lid or is_processed(lid):
         return
@@ -83,18 +84,48 @@ def _process_land_opportunity(listing: dict):
             logger.info(f"Low score ({score}) — skipped: {listing.get('title', lid)}")
             return
 
+        # ── Red flags check ──────────────────────────────────────────────────
+        red_flags = detect_red_flags(listing)
+        analysis["red_flags"] = [
+            {"code": f.code, "severity": f.severity, "message": f.message_ar}
+            for f in red_flags
+        ]
+        analysis["has_blocking_flags"] = has_blocking_flags(red_flags)
+
+        # ── Financial analysis (with hidden costs + scenarios) ────────────────
         financial = calculate_roi(analysis)
+        scenarios = calculate_roi_scenarios(analysis)
+        financial["scenarios"] = scenarios
+
         mockup = generate_mockup(analysis) if FEATURES["ai_mockup"] else None
         pdf = generate_proposal(analysis, financial, mockup) if FEATURES["pdf_proposal"] else None
 
         # ── Persist results to DB so dashboard can display them ──────────────
         update_opportunity_analysis(lid, analysis, financial, pdf)
 
-        notify_broker_opportunity(analysis, financial, pdf)
-        logger.info(
-            f"Opportunity processed: {listing.get('title', lid)} "
-            f"— score {score} | ROI {financial.get('roi_pct', 0)}%"
-        )
+        # ── Smart Alerts: HIGH red flags are an absolute block, checked first ──
+        # This must run BEFORE evaluate_smart_alert so a high-score + high-ROI deal
+        # with a legal/ownership red flag is never auto-sent to the broker.
+        if has_blocking_flags(red_flags):
+            logger.warning(
+                f"⚠️  Blocking auto-notification for {lid} (HIGH flags): "
+                f"{format_flags_arabic(red_flags)}"
+            )
+        else:
+            from pipeline.smart_alerts import evaluate_smart_alert
+            should_send, alert_reason = evaluate_smart_alert(analysis, financial)
+            if should_send:
+                analysis["smart_alert_reason"] = alert_reason
+                notify_broker_opportunity(analysis, financial, pdf)
+                logger.info(
+                    f"🚨 Smart Alert Sent: {listing.get('title', lid)} [{alert_reason}] "
+                    f"— score {score} | ROI {financial.get('roi_pct', 0)}%"
+                )
+            else:
+                logger.info(
+                    f"🔇 Silencing notification for {lid} (Ordinary deal). "
+                    f"— score {score} | ROI {financial.get('roi_pct', 0)}%"
+                )
 
     except Exception as e:
         logger.error(f"Opportunity processing error for {lid}: {e}", exc_info=True)

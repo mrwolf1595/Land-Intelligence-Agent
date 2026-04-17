@@ -88,7 +88,9 @@ def init_db():
     migrations = [
         ("contact_name", "ALTER TABLE opportunities ADD COLUMN contact_name TEXT"),
         ("duplicate_of", "ALTER TABLE opportunities ADD COLUMN duplicate_of TEXT DEFAULT NULL"),
-        ("confidence", "ALTER TABLE opportunities ADD COLUMN confidence TEXT DEFAULT 'LOW'"),
+        ("confidence",   "ALTER TABLE opportunities ADD COLUMN confidence TEXT DEFAULT 'LOW'"),
+        ("lat",          "ALTER TABLE opportunities ADD COLUMN lat REAL"),
+        ("lon",          "ALTER TABLE opportunities ADD COLUMN lon REAL"),
     ]
     for col, sql in migrations:
         if col not in existing:
@@ -105,6 +107,18 @@ def init_db():
             sample_count INTEGER,
             last_updated TEXT,
             PRIMARY KEY (city, district)
+        )
+    """)
+
+    # ── Price history for trend analysis ──────────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS price_history (
+            city TEXT NOT NULL,
+            district TEXT NOT NULL DEFAULT '',
+            avg_price_per_sqm REAL,
+            sample_count INTEGER,
+            recorded_at TEXT NOT NULL,
+            PRIMARY KEY (city, district, recorded_at)
         )
     """)
     conn.commit()
@@ -204,8 +218,8 @@ def save_opportunity(opp: dict) -> bool:
     cur = conn.execute("""
         INSERT OR IGNORE INTO opportunities
         (id, source, title, city, district, area_sqm, price_sar,
-         contact_phone, contact_name, image_urls, source_url, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+         contact_phone, contact_name, image_urls, source_url, lat, lon, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         opp.get("listing_id"),
         opp.get("source"),
@@ -218,6 +232,8 @@ def save_opportunity(opp: dict) -> bool:
         opp.get("contact_name"),
         opp.get("image_urls"),
         opp.get("source_url"),
+        opp.get("lat"),
+        opp.get("lon"),
         scraped_at or datetime.now().isoformat(),
     ))
     conn.commit()

@@ -112,12 +112,84 @@ with tab2:
             roi = fin.get("roi_pct", 0)
             confidence = o.get("confidence") or "LOW"
             conf_badge = {"HIGH": "🟢", "MEDIUM": "🟡", "LOW": "🔴"}.get(confidence, "🔴")
-            with st.expander(f"📍 {o['title']} — Score: {score}/10 | ROI: {roi}% {conf_badge} {confidence}"):
-                c1, c2, c3 = st.columns(3)
+
+            # Red flags indicator
+            red_flags = analysis.get("red_flags", [])
+            high_flags = [f for f in red_flags if f.get("severity") == "HIGH"]
+            flag_indicator = ""
+            if high_flags:
+                flag_indicator = f" ⛔ {len(high_flags)} تحذير خطير"
+            elif red_flags:
+                flag_indicator = f" ⚠️ {len(red_flags)} ملاحظة"
+
+            with st.expander(f"📍 {o['title']} — Score: {score}/10 | ROI: {roi}% {conf_badge} {confidence}{flag_indicator}"):
+                # ── Top metrics row ──────────────────────────────────────────
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("سعر الأرض", f"{o['price_sar']:,.0f} ر.س" if o["price_sar"] else "—")
                 c2.metric("صافي الربح", f"{fin.get('gross_profit_sar', 0):,.0f} ر.س")
-                c3.metric("ROI", f"{roi}%")
-                if o["pdf_path"] and os.path.exists(o["pdf_path"]):
+                c3.metric("ROI (مع التكاليف)", f"{roi}%")
+                c4.metric("التكاليف المخفية", f"{fin.get('hidden_costs_sar', 0):,.0f} ر.س")
+
+                # ── Red Flags section ────────────────────────────────────────
+                if red_flags:
+                    st.markdown("---")
+                    st.markdown("**🚩 علامات تحذيرية:**")
+                    for flag in red_flags:
+                        severity = flag.get("severity", "LOW")
+                        color = {"HIGH": "red", "MEDIUM": "orange", "LOW": "gray"}[severity]
+                        st.markdown(f":{color}[{flag.get('message', '')}]")
+
+                # ── Scenarios section ────────────────────────────────────────
+                scenarios = fin.get("scenarios", {})
+                if scenarios:
+                    st.markdown("---")
+                    st.markdown("**📊 سيناريوهات الاستثمار:**")
+                    sc1, sc2, sc3 = st.columns(3)
+                    opt = scenarios.get("optimistic", {})
+                    exp = scenarios.get("expected", {})
+                    pes = scenarios.get("pessimistic", {})
+
+                    sc1.metric(
+                        "🟢 متفائل",
+                        f"ROI {opt.get('roi_pct', 0)}%",
+                        f"ربح {opt.get('gross_profit_sar', 0):,.0f} ر.س",
+                    )
+                    sc2.metric(
+                        "🟡 متوقع",
+                        f"ROI {exp.get('roi_pct', 0)}%",
+                        f"ربح {exp.get('gross_profit_sar', 0):,.0f} ر.س",
+                    )
+                    pes_profit = pes.get("gross_profit_sar", 0)
+                    # Pass signed value so Streamlit renders red↓ for losses.
+                    # Using abs() with an Arabic prefix fools Streamlit into showing
+                    # a green↑ arrow even on a loss — so we pass the raw signed number.
+                    sc3.metric(
+                        "🔴 متشائم",
+                        f"ROI {pes.get('roi_pct', 0)}%",
+                        f"{pes_profit:,.0f} ر.س",
+                        delta_color="normal",
+                    )
+
+                    if scenarios.get("pessimistic_loss"):
+                        st.error("⛔ السيناريو المتشائم يُظهر خسارة — ادرس جيداً قبل الاقدام")
+
+                    # Breakeven
+                    be = scenarios.get("breakeven_sell_sqm", 0)
+                    if be > 0:
+                        st.caption(f"💰 سعر البيع الأدنى لعدم الخسارة: {be:,} ر.س/م²")
+
+                    # Financing
+                    financing = scenarios.get("financing", {})
+                    if financing.get("loan_amount", 0) > 0:
+                        st.markdown("---")
+                        st.markdown("**🏦 لو تمويل بنكي 70%:**")
+                        fc1, fc2, fc3 = st.columns(3)
+                        fc1.metric("كاش مطلوب", f"{financing.get('equity_needed', 0):,.0f} ر.س")
+                        fc2.metric("قسط شهري", f"{financing.get('monthly_payment', 0):,.0f} ر.س")
+                        fc3.metric("ROI بعد التمويل", f"{financing.get('effective_roi_pct', 0)}%")
+
+                # ── PDF download ─────────────────────────────────────────────
+                if o.get("pdf_path") and os.path.exists(o["pdf_path"]):
                     with open(o["pdf_path"], "rb") as f:
                         st.download_button(
                             "⬇️ تحميل Proposal PDF",

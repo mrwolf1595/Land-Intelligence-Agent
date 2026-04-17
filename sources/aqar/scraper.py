@@ -317,6 +317,11 @@ class Scraper(BaseSource):
         if phone == 0:
             phone = None
 
+        # Extract coordinates from the location field (if present in API response)
+        location = raw.get("location") or {}
+        lat = location.get("lat") if isinstance(location, dict) else None
+        lon = location.get("lng") if isinstance(location, dict) else None
+
         return {
             "listing_id":    f"aqar_{eid}",
             "source":        self.name,
@@ -330,4 +335,6 @@ class Scraper(BaseSource):
             "image_urls":    "",
             "source_url":    source_url,
             "scraped_at":    datetime.now(),
+            "lat":           float(lat) if lat else None,
+            "lon":           float(lon) if lon else None,
         }

@@ -47,23 +47,52 @@ def notify_broker_match(match: dict) -> bool:
     return _send_whatsapp(BROKER_WHATSAPP, message)
 
 def notify_broker_opportunity(analysis: dict, financial: dict, pdf_path: str = None) -> bool:
-    roi = financial.get("roi_pct", 0)
-    score = analysis.get("opportunity_score", 0)
+    # Use expected scenario if available, fallback to old format
+    scenarios = financial.get("scenarios")
+    if scenarios:
+        expected = scenarios.get("expected", {})
+        roi = expected.get("roi_pct", 0)
+        total_inv = expected.get("total_investment_sar", 0)
+        total_rev = expected.get("total_revenue_sar", 0)
+        profit = expected.get("gross_profit_sar", 0)
+        timeline = expected.get("timeline_months", "?")
+        hidden = expected.get("hidden_costs_sar", 0)
+        pes_roi = scenarios.get("pessimistic", {}).get("roi_pct", 0)
+    else:
+        roi = financial.get("roi_pct", 0)
+        total_inv = financial.get("total_investment_sar", 0)
+        total_rev = financial.get("total_revenue_sar", 0)
+        profit = financial.get("gross_profit_sar", 0)
+        timeline = financial.get("timeline_months", "?")
+        hidden = 0
+        pes_roi = 0
 
-    msg = f"""🏗️ *فرصة عقارية عالية القيمة*
+    score = analysis.get("opportunity_score", 0)
+    
+    red_flags = analysis.get("red_flags", [])
+    flags_msg = ""
+    if red_flags:
+        flags_msg = f"\n⚠️ *ملاحظات تحذيرية:* {len(red_flags)} ملاحظة"
+
+    smart_alert_reason = analysis.get("smart_alert_reason", "")
+    alert_header = f"🚨 *تنبيه ذكي: {smart_alert_reason}*" if smart_alert_reason else "🏗️ *فرصة عقارية عالية القيمة*"
+
+    msg = f"""{alert_header}
 ━━━━━━━━━━━━━━━━━━━━
 
 📍 الموقع: {analysis.get('location', 'غير محدد')}
 📐 المساحة: {analysis.get('land_area_sqm', '?')} م²
 💰 السعر: {_fmt_price(analysis.get('asking_price_sar'))}
-🏆 درجة الفرصة: {score}/10
+🏆 درجة الفرصة: {score}/10{flags_msg}
 🏢 التطوير المقترح: {_dev_label(analysis.get('recommended_development'))}
 
-💹 *النموذج المالي:*
-• إجمالي الاستثمار: {_fmt_price(financial.get('total_investment_sar'))}
-• الإيرادات المتوقعة: {_fmt_price(financial.get('total_revenue_sar'))}
-• صافي الربح: {_fmt_price(financial.get('gross_profit_sar'))}
-• العائد: {roi}% خلال {financial.get('timeline_months', '?')} شهر
+💹 *النموذج المالي (السيناريو المتوقع):*
+• إجمالي الاستثمار (مع الرسوم المخفية): {_fmt_price(total_inv)}
+• الرسوم المخفية: {_fmt_price(hidden)}
+• الإيرادات المتوقعة: {_fmt_price(total_rev)}
+• صافي الربح: {_fmt_price(profit)}
+• العائد المتوقع: {roi}% خلال {timeline} شهر
+• عائد السيناريو المتشائم: {pes_roi}%
 
 🔗 {analysis.get('source_url', '')}
 {"📎 تم إرفاق الـ Proposal PDF" if pdf_path else ""}"""

@@ -11,7 +11,9 @@ import json
 from ollama import Client
 from config import OLLAMA_API_URL, OLLAMA_MODEL
 from core.logger import get_logger
-from pipeline.benchmarks import get_benchmark
+from pipeline.benchmarks import get_benchmark, get_price_trend
+from pipeline.market_depth import analyze_market_depth
+from sources.osm.scraper import get_nearby_amenities
 
 logger = get_logger("analyzer")
 
@@ -83,22 +85,83 @@ def _rule_based_score(listing_data: dict) -> float:
     if 100_000 <= price_sar <= 50_000_000:
         score += 1.0
 
+    # ── Trend & Supply adjustments ─────────────────────────────────────
+    trend = get_price_trend(city, district)
+    if trend and trend["direction"] == "DOWN":
+        score -= 2.0  # Punish score if market is dropping
+        
+    depth = analyze_market_depth(city, district)
+    score -= float(depth.get("supply_penalty", 0))
+
+    # ── Location Geoprocessing (Amenities) ─────────────────────────────
+    lat = listing_data.get("lat")
+    lon = listing_data.get("lon")
+    if lat and lon:
+        # Reuse cached amenities from analyze_land() if already fetched —
+        # avoids double-hitting the Overpass API on the Ollama-failure path.
+        amenities = listing_data.get("amenities_cache")
+        if amenities is None:
+            try:
+                amenities = get_nearby_amenities(float(lat), float(lon), radius=2000)
+                listing_data["amenities_cache"] = amenities
+            except Exception as e:
+                logger.debug(f"Amenity fetch failed in rule-based score: {e}")
+                amenities = None
+        if amenities:
+            target_poi = amenities.get("total_points_of_interest", 0)
+            if target_poi > 50:
+                score += 1.5   # Highly vital area
+            elif target_poi > 15:
+                score += 0.5   # Good area
+            elif target_poi == 0:
+                score -= 1.0   # Remote or undeveloped area
+
     return min(max(score, 0.0), 10.0)
 
 
-def _build_market_context(city: str, district: str, price_sqm: float) -> str:
+def _build_market_context(city: str, district: str, price_sqm: float, listing: dict = None) -> str:
     """Build Arabic market context string for Ollama prompt injection."""
     bench = get_benchmark(city, district) or get_benchmark(city, "")
+    trend = get_price_trend(city, district)
+    depth = analyze_market_depth(city, district)
+    
     if not bench or price_sqm <= 0:
         return ""
     ratio = price_sqm / bench["avg"]
     pct = abs(1 - ratio) * 100
     direction = "أرخص" if ratio < 1 else "أغلى"
+    
+    trend_str = ""
+    if trend:
+        if trend["direction"] == "DOWN":
+            trend_str = f"⚠️ السوق في هذه المنطقة في نزول بنسبة {abs(trend['change_pct']):.1f}% مؤخراً!"
+        elif trend["direction"] == "UP":
+            trend_str = f"📈 السوق في هذه المنطقة في صعود بنسبة {trend['change_pct']:.1f}% مؤخراً."
+        else:
+            trend_str = "السوق في هذه المنطقة مستقر."
+            
+    supply_str = ""
+    if depth["market_condition"] == "OVERSUPPLIED":
+        supply_str = f"⚠️ المنطقة مشبعة بالمعروض ({depth['total_known_supply']} عقار معروض حاليا). قد يكون من الصعب البيع."
+    elif depth["market_condition"] == "LOW_SUPPLY":
+        supply_str = f"🔥 المعروض في المنطقة قليل ومطلوب."
+        
+    amenity_str = ""
+    if listing and "amenities_cache" in listing:
+        am = listing["amenities_cache"]
+        if am.get("total_points_of_interest", 0) > 0:
+            amenity_str = f"📍 حيوية الموقع (قطر 2كم): {am.get('schools')} مدارس، {am.get('healthcare')} مراكز صحية، {am.get('mosques')} مساجد، و {am.get('commercial')} محلات تجارية."
+        else:
+            amenity_str = "📍 الموقع يبدو جديداً أو نائياً (لا تتوفر خدمات حكومية/تجارية قريبة في نطاق 2 كم)."
+            
     return f"""
 === سياق السوق ===
 متوسط سعر م² في {city}{' - ' + district if district else ''}: {bench['avg']:,.0f} ريال
 هذا العقار {direction} من متوسط السوق بنسبة {pct:.1f}%
 حجم العينة: {bench['count']} عقار
+{trend_str}
+{supply_str}
+{amenity_str}
 ==================
 """
 
@@ -119,11 +182,21 @@ def analyze_land(listing_data: dict) -> dict:
     price_sar = float(listing_data.get("price_sar") or 0)
     price_sqm = price_sar / area_sqm if area_sqm > 0 else 0
 
+    # ── Fetch Coordinates & Amenities ────────────────────────────────
+    lat = listing_data.get("lat")
+    lon = listing_data.get("lon")
+    if lat and lon:
+        try:
+            amenities = get_nearby_amenities(float(lat), float(lon), radius=2000)
+            listing_data["amenities_cache"] = amenities
+        except Exception:
+            pass
+
     # Get benchmark for confidence determination
     bench = get_benchmark(city, district) or get_benchmark(city, "")
 
     # Build market context for prompt
-    market_ctx = _build_market_context(city, district, price_sqm)
+    market_ctx = _build_market_context(city, district, price_sqm, listing_data)
 
     prompt = f"""{market_ctx}
 العنوان: {listing_data.get('title', '')}
