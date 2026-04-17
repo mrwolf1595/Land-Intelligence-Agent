@@ -65,6 +65,14 @@ def run_scraping_cycle():
     from core.dedup import mark_duplicates
     mark_duplicates()
 
+    # ── MOJ: pull real closed-transaction prices (source of truth for benchmarks)
+    try:
+        from sources.moj.scraper import update_reference_prices
+        moj_count = update_reference_prices()
+        logger.info(f"MOJ reference prices updated: {moj_count} districts")
+    except Exception as e:
+        logger.warning(f"MOJ update skipped: {e}")
+
     from pipeline.benchmarks import rebuild_benchmarks
     rebuild_benchmarks()
 

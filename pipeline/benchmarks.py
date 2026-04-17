@@ -75,15 +75,38 @@ def rebuild_benchmarks():
 
 
 def get_benchmark(city: str, district: str = "") -> dict | None:
-    """Return benchmark stats for a city+district, or None."""
+    """Return benchmark stats for a city+district, or None.
+
+    Priority:
+      1. market_reference_prices (MOJ real closed transactions) — most trusted
+      2. price_benchmarks (calculated from scraped ask-prices) — fallback
+    """
     conn = get_conn()
+
+    # ── 1. Try MOJ reference prices first ────────────────────────────────────
+    ref = conn.execute("""
+        SELECT price_per_sqm, sample_count
+        FROM market_reference_prices
+        WHERE city = ? AND district = ? AND source = 'moj'
+    """, (city, district)).fetchone()
+
+    if ref and ref[1] >= 2:
+        conn.close()
+        return {
+            "avg":    ref[0],
+            "median": ref[0],   # MOJ gives avg; use same for median
+            "count":  ref[1],
+            "source": "moj",    # ← tells scorer this is high-quality data
+        }
+
+    # ── 2. Fallback: scraped ask-price benchmarks ─────────────────────────────
     row = conn.execute("""
         SELECT avg_price_per_sqm, median_price_per_sqm, sample_count
         FROM price_benchmarks WHERE city=? AND district=?
     """, (city, district)).fetchone()
     conn.close()
     if row:
-        return {"avg": row[0], "median": row[1], "count": row[2]}
+        return {"avg": row[0], "median": row[1], "count": row[2], "source": "scraped"}
     return None
 
 

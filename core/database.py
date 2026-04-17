@@ -121,6 +121,19 @@ def init_db():
             PRIMARY KEY (city, district, recorded_at)
         )
     """)
+    # ── MOJ real-transaction reference prices ─────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_reference_prices (
+            city             TEXT NOT NULL,
+            district         TEXT NOT NULL DEFAULT '',
+            price_per_sqm    REAL NOT NULL,
+            source           TEXT NOT NULL DEFAULT 'moj',
+            transaction_date TEXT,
+            sample_count     INTEGER DEFAULT 1,
+            created_at       TEXT,
+            PRIMARY KEY (city, district, source)
+        )
+    """)
     conn.commit()
     conn.close()
 
