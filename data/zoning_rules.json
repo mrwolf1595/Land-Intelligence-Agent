@@ -1,0 +1,33 @@
+{
+    "الرياض": {
+        "default_far": 2.5,
+        "districts": {
+            "النرجس": {"far": 2.0, "max_floors": 4, "setback_m": 5},
+            "حطين": {"far": 3.0, "max_floors": 6, "setback_m": 3},
+            "العليا": {"far": 4.5, "max_floors": 10, "setback_m": 3},
+            "الملز": {"far": 2.5, "max_floors": 5, "setback_m": 4},
+            "الياسمين": {"far": 2.0, "max_floors": 4, "setback_m": 5},
+            "الربيع": {"far": 2.5, "max_floors": 5, "setback_m": 4}
+        }
+    },
+    "جدة": {
+        "default_far": 3.0,
+        "districts": {
+            "الشاطئ": {"far": 4.0, "max_floors": 8, "setback_m": 3},
+            "الروضة": {"far": 3.5, "max_floors": 7, "setback_m": 4},
+            "الصفا": {"far": 2.8, "max_floors": 6, "setback_m": 4},
+            "المحمدية": {"far": 2.5, "max_floors": 5, "setback_m": 5}
+        }
+    },
+    "الدمام": {
+        "default_far": 2.2,
+        "districts": {
+            "الشاطئ": {"far": 3.0, "max_floors": 6, "setback_m": 4},
+            "الفيصلية": {"far": 2.0, "max_floors": 4, "setback_m": 5}
+        }
+    },
+    "default": {
+        "default_far": 2.0,
+        "districts": {}
+    }
+}

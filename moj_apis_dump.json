@@ -1,0 +1,94 @@
+[
+    {
+        "url": "https://prod-inquiryservice-srem.moj.gov.sa/api/v1/MobileFeature/GetMaintenanceSchedules",
+        "method": "GET",
+        "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "referer": "https://srem.moj.gov.sa/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+            "accept": "application/json, text/plain, */*",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "sec-ch-ua-mobile": "?0"
+        },
+        "post_data": null
+    },
+    {
+        "url": "https://prod-inquiryservice-srem.moj.gov.sa/api/v1/MobileFeature/GetNextMaintenanceSchedules",
+        "method": "GET",
+        "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "authorization": "undefined undefined",
+            "referer": "https://srem.moj.gov.sa/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+            "accept": "application/json, text/plain, */*",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "sec-ch-ua-mobile": "?0"
+        },
+        "post_data": null
+    },
+    {
+        "url": "https://prod-srem-api-srem.moj.gov.sa/api/v1/Dashboard/GetAreaInfo",
+        "method": "POST",
+        "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "referer": "https://srem.moj.gov.sa/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+            "accept": "application/json, text/plain, */*",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "content-type": "application/json",
+            "sec-ch-ua-mobile": "?0"
+        },
+        "post_data": "{\"periodCategory\":\"D\",\"period\":1,\"areaSerial\":0,\"areaType\":\"A\",\"cityCode\":0}"
+    },
+    {
+        "url": "https://prod-srem-api-srem.moj.gov.sa/api/v1/Dashboard/GetMarketIndex",
+        "method": "GET",
+        "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "referer": "https://srem.moj.gov.sa/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+            "accept": "application/json, text/plain, */*",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "sec-ch-ua-mobile": "?0"
+        },
+        "post_data": null
+    },
+    {
+        "url": "https://prod-srem-api-srem.moj.gov.sa/api/v1/Dashboard/GetTrendingDistricts",
+        "method": "POST",
+        "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "referer": "https://srem.moj.gov.sa/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+            "accept": "application/json, text/plain, */*",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "content-type": "application/json",
+            "sec-ch-ua-mobile": "?0"
+        },
+        "post_data": "{\"periodCategory\":\"D\",\"citySerial\":0,\"areaCategory\":\"A\",\"areaSerial\":0}"
+    },
+    {
+        "url": "https://analytics.google.com/g/collect?v=2&tid=G-XHTH7KPYN3&gtm=45je64f0h2v9164215486z89164194455za20gzb9164194455zd9164194455&_p=1776347655997&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AAAAAGA&are=1&cid=2131203934.1776347657&frm=0&pscdl=noapi&rcb=19&sr=1280x720&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uam=&uamb=0&uap=Windows&uapv=10.0.0&uaw=0&ul=en-us&_s=1&tag_exp=0~115616985~115938466~115938469~116363098~117266401~118012009~118128923&sid=1776347657&sct=1&seg=0&dl=https%3A%2F%2Fsrem.moj.gov.sa%2F&dt=%D8%A7%D9%84%D8%A8%D9%88%D8%B1%D8%B5%D8%A9%20%D8%A7%D9%84%D8%B9%D9%82%D8%A7%D8%B1%D9%8A%D8%A9%20%7C%20Real%20Estate%20Market&en=page_view&_fv=1&_nsi=1&_ss=1&tfd=2001",
+        "method": "POST",
+        "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "referer": "https://srem.moj.gov.sa/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "sec-ch-ua-mobile": "?0"
+        },
+        "post_data": null
+    },
+    {
+        "url": "https://maps.googleapis.com/maps/api/mapsjs/gen_204?csp_test=true",
+        "method": "GET",
+        "headers": {
+            "sec-ch-ua-platform": "\"Windows\"",
+            "referer": "https://srem.moj.gov.sa/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+            "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"HeadlessChrome\";v=\"145\", \"Chromium\";v=\"145\"",
+            "sec-ch-ua-mobile": "?0"
+        },
+        "post_data": null
+    }
+]
