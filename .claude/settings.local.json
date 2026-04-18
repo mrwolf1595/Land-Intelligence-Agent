@@ -44,7 +44,10 @@
       "Bash(python -m sources.sama.scraper)",
       "Bash(python -m sources.wafi.scraper)",
       "Bash(python -m sources.balady.scraper)",
-      "Bash(grep -E \"\\\\.\\(env|env\\\\.example|env\\\\.sample\\)$\")"
+      "Bash(grep -E \"\\\\.\\(env|env\\\\.example|env\\\\.sample\\)$\")",
+      "Read(//home/wolf/Desktop/**)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('dependencies',{}\\).get\\('whatsapp-web.js','?'\\), d.get\\('dependencies',{}\\).get\\('puppeteer-core','?'\\)\\)\")",
+      "Bash(wslpath -u \"K:/Projects/Land Intelligence Agent/sources/aqar/scraper.py\")"
     ]
   }
 }
