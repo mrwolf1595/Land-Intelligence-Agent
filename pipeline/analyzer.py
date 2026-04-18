@@ -43,22 +43,25 @@ def _extract_json(text: str) -> str:
 
 client = Client(host=OLLAMA_API_URL)
 
-ANALYZER_PROMPT = """أنت محلل عقاري سعودي خبير.
-بناءً على معلومات الإعلان فقط، أرجع JSON فقط:
+ANALYZER_PROMPT = """أنت محلل عقاري سعودي خبير. يجب أن تكتب جميع النصوص باللغة العربية فقط.
+بناءً على معلومات الإعلان فقط، أرجع JSON فقط بدون أي نص خارجه:
 {
   "land_area_sqm": number or null,
-  "location": "string",
+  "location": "string بالعربي",
   "asking_price_sar": number,
   "price_per_sqm": number or null,
   "recommended_development": "apartments"|"villas"|"commercial"|"mixed",
   "development_reasoning": "string بالعربي",
-  "estimated_units": number,
+  "estimated_units": number or null,
   "opportunity_score": number (0-10),
   "score_reasoning": "string بالعربي",
-  "flags": ["string"],
-  "risks": ["string"],
-  "market_notes": "string"
+  "flags": ["string بالعربي"],
+  "risks": ["string بالعربي"],
+  "market_notes": "string بالعربي"
 }
+
+تعليمات مهمة:
+- اكتب جميع القيم النصية باللغة العربية فقط، لا تستخدم الإنجليزية أو الصينية أو أي لغة أخرى.
 
 معايير opportunity_score:
 - سعر المتر أقل من متوسط الحي: +2 نقطة
