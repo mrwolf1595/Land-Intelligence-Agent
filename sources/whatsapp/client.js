@@ -27,13 +27,42 @@ let waClient = null;
 function initializeWhatsApp() {
     console.log('🔄 Initializing WhatsApp Client...');
     
+    // On Linux: use system Chromium to avoid bundled-browser issues.
+    // Falls back gracefully if not found (Windows / Mac).
+    const LINUX_CHROME_PATHS = [
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+    ];
+    const { execSync } = require('child_process');
+    let executablePath;
+    for (const p of LINUX_CHROME_PATHS) {
+        try { execSync(`test -x ${p}`); executablePath = p; break; } catch {}
+    }
+
     try {
+        const puppeteerConfig = {
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',   // critical on Linux: prevents /dev/shm OOM crash
+                '--disable-gpu',
+                '--disable-extensions',
+                '--disable-background-networking',
+                '--no-first-run',
+                '--no-zygote',
+            ],
+        };
+        if (executablePath) {
+            puppeteerConfig.executablePath = executablePath;
+            console.log(`🌐 Using system Chromium: ${executablePath}`);
+        }
+
         const client = new Client({
             authStrategy: new LocalAuth({ dataPath: '.wwebjs_auth' }),
-            puppeteer: {
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            }
+            puppeteer: puppeteerConfig,
         });
 
     client.on('qr', (qr) => {

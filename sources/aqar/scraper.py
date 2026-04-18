@@ -98,15 +98,8 @@ query findListings($size: Int, $from: Int, $sort: SortInput, $where: ListingWher
 }
 """
 
-_GET_CITIES_QUERY = """
-query getAllCities($input: GetAllCitiesInput) {
-  getAllCities(input: $input) {
-    name
-    city_id
-    count
-  }
-}
-"""
+# NOTE: getAllCities was removed from Aqar GraphQL schema (2025).
+# We no longer call it — city filtering is done via TARGET_CITIES config directly.
 
 
 def _make_session():
@@ -156,20 +149,6 @@ def _extract_listings(data: dict) -> list:
     return []
 
 
-def _fetch_cities(session) -> list[dict]:
-    """Fetch all available cities from Aqar."""
-    payload = {
-        "operationName": "getAllCities",
-        "query": _GET_CITIES_QUERY,
-        "variables": {"input": {"category": 0}},
-    }
-    data = _post(session, payload)
-    if not data:
-        return []
-    d = data.get("data", {})
-    return d.get("getAllCities") or []
-
-
 def _city_matches(city_name: str) -> bool:
     if not city_name or not TARGET_CITIES:
         return True
@@ -192,15 +171,9 @@ class Scraper(BaseSource):
         use_legacy     = False
 
         try:
-            # Fetch city list, then filter to TARGET_CITIES
-            cities = _fetch_cities(session)
-            if not cities:
-                logger.warning("[aqar] Could not fetch city list — scraping without city filter")
-                cities = [{"name": c, "city_id": None} for c in TARGET_CITIES]
-            else:
-                if TARGET_CITIES:
-                    cities = [c for c in cities if _city_matches(c.get("name", ""))]
-                logger.info(f"[aqar] Scraping {len(cities)} cities")
+            # Use TARGET_CITIES directly (Aqar removed the getAllCities API)
+            cities = [{"name": c, "city_id": None} for c in TARGET_CITIES]
+            logger.info(f"[aqar] Scraping {len(cities)} cities")
 
             for city_obj in cities:
                 city_id   = city_obj.get("city_id")
