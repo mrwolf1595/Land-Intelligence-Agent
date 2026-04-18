@@ -148,15 +148,16 @@ function initializeWhatsApp() {
         }
     });
 
-        client.initialize().catch((err) => {
+        client.initialize().catch(async (err) => {
             console.error('❌ WhatsApp initialize failed:', err.message);
-            console.log('🔄 Retrying WhatsApp in 15 seconds...');
-            setTimeout(initializeWhatsApp, 15000);
+            try { await client.destroy(); } catch {}
+            console.log('🔄 Retrying WhatsApp in 20 seconds...');
+            setTimeout(initializeWhatsApp, 20000);
         });
 
     } catch (e) {
         console.error('❌ WhatsApp client error:', e.message);
-        setTimeout(initializeWhatsApp, 15000);
+        setTimeout(initializeWhatsApp, 20000);
     }
 }
 
