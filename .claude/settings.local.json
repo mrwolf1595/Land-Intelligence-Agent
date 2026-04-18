@@ -25,7 +25,21 @@
       "Bash(.venv/Scripts/pip.exe install:*)",
       "mcp__Claude_in_Chrome__computer",
       "Bash(python sources/moj/scraper.py)",
-      "Bash(python -m sources.moj.scraper)"
+      "Bash(python -m sources.moj.scraper)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh api *)",
+      "Bash(curl -s https://api.github.com/repos/civillizard/Saudi-Real-Estate-Data/contents/)",
+      "Bash(grep -i \"\\\\.csv$\")",
+      "Bash(grep -E \"\\\\.\\(csv|CSV\\)$\")",
+      "Bash(awk '{print $NF}')",
+      "Bash(python -c ' *)",
+      "WebFetch(domain:datasource.kapsarc.org)",
+      "WebFetch(domain:www.stats.gov.sa)",
+      "WebSearch",
+      "WebFetch(domain:data.kapsarc.org)",
+      "Bash(python -c \"import os; open\\(r'K:\\\\Projects\\\\Land Intelligence Agent\\\\sources\\\\ejar\\\\scraper.py', 'w'\\).close\\(\\); print\\('created'\\)\")",
+      "Bash(python -c \"open\\(r'K:\\\\Projects\\\\Land Intelligence Agent\\\\pipeline\\\\data_refresh.py', 'w'\\).close\\(\\); print\\('ok'\\)\")",
+      "Bash(python -m sources.ejar.scraper)"
     ]
   }
 }

@@ -77,13 +77,14 @@ def rebuild_benchmarks():
 def get_benchmark(city: str, district: str = "") -> dict | None:
     """Return benchmark stats for a city+district, or None.
 
-    Priority:
-      1. market_reference_prices (MOJ real closed transactions) — most trusted
-      2. price_benchmarks (calculated from scraped ask-prices) — fallback
+    Priority (highest → lowest data quality):
+      1. market_reference_prices source='moj'       — live API, 19 trending districts
+      2. market_reference_prices source='local_moj' — 1.4M CSV transactions, all cities
+      3. price_benchmarks                           — scraped ask-prices (fallback)
     """
     conn = get_conn()
 
-    # ── 1. Try MOJ reference prices first ────────────────────────────────────
+    # ── 1. Live MOJ API prices (trending districts — freshest data) ──────────
     ref = conn.execute("""
         SELECT price_per_sqm, sample_count
         FROM market_reference_prices
@@ -94,12 +95,28 @@ def get_benchmark(city: str, district: str = "") -> dict | None:
         conn.close()
         return {
             "avg":    ref[0],
-            "median": ref[0],   # MOJ gives avg; use same for median
+            "median": ref[0],
             "count":  ref[1],
-            "source": "moj",    # ← tells scorer this is high-quality data
+            "source": "moj",
         }
 
-    # ── 2. Fallback: scraped ask-price benchmarks ─────────────────────────────
+    # ── 2. Local MOJ CSV (1.4M transactions — comprehensive city coverage) ───
+    ref_local = conn.execute("""
+        SELECT price_per_sqm, sample_count
+        FROM market_reference_prices
+        WHERE city = ? AND district = ? AND source = 'local_moj'
+    """, (city, district)).fetchone()
+
+    if ref_local and ref_local[1] >= 3:
+        conn.close()
+        return {
+            "avg":    ref_local[0],
+            "median": ref_local[0],
+            "count":  ref_local[1],
+            "source": "local_moj",
+        }
+
+    # ── 3. Fallback: scraped ask-price benchmarks ─────────────────────────────
     row = conn.execute("""
         SELECT avg_price_per_sqm, median_price_per_sqm, sample_count
         FROM price_benchmarks WHERE city=? AND district=?

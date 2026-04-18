@@ -173,11 +173,21 @@ def _wait_for_bridge(port: int, max_wait: int = 15) -> bool:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["monitor", "scrape", "match", "all"], default="all")
+    parser.add_argument("--reimport", action="store_true",
+                        help="Force re-import of all local CSV data (after git pull)")
     args = parser.parse_args()
 
     init_db()
     validate_config()
     logger.info(f"Land Intelligence Agent — Mode: {args.mode}")
+
+    # ── Local data import (MOJ CSV + REGA + KAPSARC + GASTAT) ────────────────
+    # Runs once per day; subsequent calls are no-ops unless --reimport is passed.
+    try:
+        from pipeline.local_data import run_all_imports
+        run_all_imports(force=args.reimport)
+    except Exception as e:
+        logger.warning(f"Local data import failed (non-fatal): {e}")
 
     # ── WhatsApp: bridge FIRST, then Node.js client ───────────────────────────
     if args.mode in ("monitor", "all") and FEATURES["whatsapp_monitor"]:
@@ -213,15 +223,26 @@ def main():
 
     # Matching: 10-minute interval avoids "max instances reached" with slow Ollama
     # Scraping: hourly as planned
+    # Data refresh: weekly (Ejar live rental + MOJ API + git pull repo)
     scheduler = AgentScheduler(blocking=True)
     scheduler.add_interval(run_matching_cycle, minutes=10)
     scheduler.add_interval(run_scraping_cycle, hours=1)
+    scheduler.add_interval(_run_weekly_data_refresh, hours=168)   # 7 × 24h
 
     try:
         scheduler.start()
     except KeyboardInterrupt:
         scheduler.stop()
         logger.info("Agent stopped.")
+
+
+def _run_weekly_data_refresh():
+    """Weekly market data refresh — Ejar live + MOJ API + git pull repo."""
+    try:
+        from pipeline.data_refresh import run_weekly_refresh
+        run_weekly_refresh()
+    except Exception as e:
+        logger.error(f"Weekly data refresh failed: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

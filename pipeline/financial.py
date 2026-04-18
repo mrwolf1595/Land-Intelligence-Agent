@@ -4,10 +4,15 @@ Financial analysis for land opportunities.
 Provides:
   - calculate_roi(): Single expected-case ROI (backward compatible)
   - calculate_roi_scenarios(): 3 scenarios (optimistic/expected/pessimistic)
+    + rental yield scenario (Build & Hold)
   - Full hidden costs + optional financing integration
 
-Uses price benchmarks when available (30% development markup over market avg),
-falls back to hardcoded SELL_PRICE from config.py when benchmark data is thin.
+Benchmark priority (see pipeline/benchmarks.py):
+  1. local_moj  — 1.4M closed transactions (civillizard/Saudi-Real-Estate-Data)
+  2. moj API    — live trending districts
+  3. scraped    — ask-prices (fallback)
+
+Rental yield uses real REGA city-level data when available.
 """
 from config import CONSTRUCTION_COST, SELL_PRICE, UNIT_SIZE_SQM
 from pipeline.benchmarks import get_benchmark
@@ -196,14 +201,82 @@ def calculate_roi_scenarios(analysis: dict) -> dict:
     else:
         financing["effective_roi_pct"] = 0
 
+    # ── Rental Yield Scenario (Build & Hold) ───────────────────────────────────
+    # Uses real REGA city-level rental data.
+    # Assumes apartments (most common development type).
+    rental_scenario = _compute_rental_scenario(
+        inp["land_price"],
+        inp["buildable_sqm"],
+        inp["cost_per_sqm"],
+        expected["total_investment_sar"],
+        inp["city"],
+    )
+
     return {
         "optimistic": optimistic,
         "expected": expected,
         "pessimistic": pessimistic,
         "breakeven_sell_sqm": breakeven_sell_sqm,
         "financing": financing,
+        "rental": rental_scenario,
         "benchmark_source": inp["benchmark_source"],
         "benchmark_avg_sqm": inp["bench"]["avg"] if inp["bench"] else None,
         # Convenience flag for the pipeline
         "pessimistic_loss": pessimistic["roi_pct"] < 0,
+    }
+
+
+def _compute_rental_scenario(
+    land_price: float,
+    buildable_sqm: float,
+    cost_per_sqm: float,
+    total_investment: float,
+    city: str,
+) -> dict:
+    """
+    Compute Build & Hold (rental) scenario using REGA city-level rental data.
+
+    Assumes development into apartments; calculates:
+      - Estimated number of units
+      - Annual gross rental income
+      - Annual yield % on total investment
+      - Payback period in years
+
+    Returns a dict with rental scenario metrics (or empty dict if no data).
+    """
+    try:
+        from pipeline.local_data import get_rental_rate, get_rental_yield_pct
+    except ImportError:
+        return {}
+
+    avg_apt_size = 110   # m² per typical apartment
+    num_units    = max(1, int(buildable_sqm / avg_apt_size))
+
+    # Try city-level rental rate (SAR/year/unit)
+    annual_rent_per_unit = get_rental_rate(city, "شقة")
+    if not annual_rent_per_unit:
+        return {}   # no data — skip scenario
+
+    gross_annual_income = num_units * annual_rent_per_unit
+
+    # Deduct 15% operating costs (maintenance, vacancy, mgmt)
+    net_annual_income = gross_annual_income * 0.85
+
+    if total_investment <= 0:
+        return {}
+
+    annual_yield_pct = round((net_annual_income / total_investment) * 100, 2)
+    payback_years    = round(total_investment / net_annual_income, 1) if net_annual_income > 0 else None
+
+    return {
+        "strategy":              "build_and_hold",
+        "num_units":             num_units,
+        "avg_unit_size_sqm":     avg_apt_size,
+        "annual_rent_per_unit":  round(annual_rent_per_unit),
+        "gross_annual_income":   round(gross_annual_income),
+        "net_annual_income":     round(net_annual_income),
+        "annual_yield_pct":      annual_yield_pct,
+        "payback_years":         payback_years,
+        "rental_data_source":    "rega",
+        "city":                  city,
     }

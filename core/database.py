@@ -134,6 +134,61 @@ def init_db():
             PRIMARY KEY (city, district, source)
         )
     """)
+
+    # ── REGA rental benchmarks (city × property-type avg annual rent) ─────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rental_benchmarks (
+            city                 TEXT NOT NULL,
+            district             TEXT NOT NULL DEFAULT '',
+            property_type_ar     TEXT NOT NULL,
+            property_category    TEXT,
+            avg_annual_rent_sar  REAL,
+            rent_per_sqm_year    REAL,
+            typical_area_sqm     REAL,
+            sample_count         INTEGER,
+            source               TEXT DEFAULT 'rega',
+            last_updated         TEXT,
+            PRIMARY KEY (city, district, property_type_ar)
+        )
+    """)
+
+    # ── KAPSARC / national quarterly price index ───────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS price_index_history (
+            year         INTEGER NOT NULL,
+            quarter      TEXT    NOT NULL,
+            sector       TEXT    NOT NULL,
+            index_value  REAL,
+            base_year    INTEGER DEFAULT 2023,
+            source       TEXT    DEFAULT 'kapsarc',
+            PRIMARY KEY (year, quarter, sector, base_year)
+        )
+    """)
+
+    # ── GASTAT REPI — regional real-estate price index ────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS repi_index (
+            year            INTEGER NOT NULL,
+            quarter         TEXT    NOT NULL,
+            region          TEXT    NOT NULL,
+            category_code   TEXT    NOT NULL,
+            category_name   TEXT,
+            index_value     REAL,
+            yoy_change_pct  REAL,
+            qoq_change_pct  REAL,
+            PRIMARY KEY (year, quarter, region, category_code)
+        )
+    """)
+
+    # ── Local data import log (one row per source) ────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS data_import_log (
+            source        TEXT PRIMARY KEY,
+            imported_at   TEXT,
+            record_count  INTEGER
+        )
+    """)
+
     conn.commit()
     conn.close()
 
