@@ -39,7 +39,11 @@
       "WebFetch(domain:data.kapsarc.org)",
       "Bash(python -c \"import os; open\\(r'K:\\\\Projects\\\\Land Intelligence Agent\\\\sources\\\\ejar\\\\scraper.py', 'w'\\).close\\(\\); print\\('created'\\)\")",
       "Bash(python -c \"open\\(r'K:\\\\Projects\\\\Land Intelligence Agent\\\\pipeline\\\\data_refresh.py', 'w'\\).close\\(\\); print\\('ok'\\)\")",
-      "Bash(python -m sources.ejar.scraper)"
+      "Bash(python -m sources.ejar.scraper)",
+      "mcp__Claude_in_Chrome__get_page_text",
+      "Bash(python -m sources.sama.scraper)",
+      "Bash(python -m sources.wafi.scraper)",
+      "Bash(python -m sources.balady.scraper)"
     ]
   }
 }
