@@ -148,12 +148,22 @@ function initializeWhatsApp() {
         }
     });
 
-        client.initialize();
+        client.initialize().catch((err) => {
+            console.error('❌ WhatsApp initialize failed:', err.message);
+            console.log('🔄 Retrying WhatsApp in 15 seconds...');
+            setTimeout(initializeWhatsApp, 15000);
+        });
+
     } catch (e) {
         console.error('❌ WhatsApp client error:', e.message);
-        console.log('ℹ️ Deferring WhatsApp connection. Manual session activation required.');
+        setTimeout(initializeWhatsApp, 15000);
     }
 }
+
+// Safety net: catch any unhandled rejections so the process never crashes
+process.on('unhandledRejection', (reason) => {
+    console.error('⚠️ Unhandled rejection (non-fatal):', reason?.message || reason);
+});
 
 // HTTP API: Python -> WhatsApp
 app.post('/send', async (req, res) => {
