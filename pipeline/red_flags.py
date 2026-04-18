@@ -16,6 +16,21 @@ from dataclasses import dataclass, field
 from pipeline.benchmarks import get_benchmark
 from core.logger import get_logger
 
+# Balady zoning check — lazy import to avoid startup cost
+def _balady_zoning_check(listing: dict) -> dict | None:
+    """Try Balady GIS zoning check. Returns result or None if unavailable/slow."""
+    lat = listing.get("lat") or listing.get("latitude")
+    lon = listing.get("lon") or listing.get("longitude")
+    if not lat or not lon:
+        return None
+    try:
+        from sources.balady.scraper import check_zoning_mismatch
+        advertised = listing.get("property_type") or listing.get("type_ar") or ""
+        return check_zoning_mismatch(advertised, float(lat), float(lon))
+    except Exception as e:
+        logger.debug(f"[red_flags] Balady check skipped: {e}")
+        return None
+
 logger = get_logger("red_flags")
 
 
@@ -176,6 +191,18 @@ def detect_red_flags(listing: dict, bench: dict | None = None) -> list[RedFlag]:
             "NO_AREA", "MEDIUM",
             "📐 المساحة غير مذكورة — لا يمكن حساب سعر المتر",
             "No area specified",
+        ))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 7. ZONING MISMATCH (Balady GIS — only when lat/lon available)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    zoning = _balady_zoning_check(listing)
+    if zoning and zoning.get("mismatch"):
+        flags.append(RedFlag(
+            "ZONING_MISMATCH", "HIGH",
+            f"⛔ تعارض في الاستخدام: المعلن عنه [{zoning['advertised']}] لكن البلدي يسجله [{zoning['official']}] — تحقق قبل أي قرار",
+            f"Listed: {zoning['advertised']} vs Balady official: {zoning['official']}",
         ))
 
     # ═══════════════════════════════════════════════════════════════════════════

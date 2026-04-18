@@ -43,7 +43,8 @@
       "mcp__Claude_in_Chrome__get_page_text",
       "Bash(python -m sources.sama.scraper)",
       "Bash(python -m sources.wafi.scraper)",
-      "Bash(python -m sources.balady.scraper)"
+      "Bash(python -m sources.balady.scraper)",
+      "Bash(grep -E \"\\\\.\\(env|env\\\\.example|env\\\\.sample\\)$\")"
     ]
   }
 }

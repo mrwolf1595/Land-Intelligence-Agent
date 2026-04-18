@@ -20,11 +20,21 @@ Used by:
 
 import csv
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 import httpx
+
+# Excel serial date base (Excel incorrectly treats 1900 as leap year, so offset = Dec 30 1899)
+_XL_BASE = datetime(1899, 12, 30)
+
+def _xl_serial_to_year(serial: float) -> int | None:
+    """Convert Excel date serial (e.g. 45291 → 2024) to calendar year."""
+    try:
+        return (_XL_BASE + timedelta(days=int(serial))).year
+    except Exception:
+        return None
 
 from core.logger import get_logger
 
@@ -105,8 +115,10 @@ def _parse_table_8_1() -> Optional[dict]:
                     continue
                 rows.append(row)
 
-        # Find annual rows (no quarter prefix — col[1] is the year number or empty)
-        annual = [r for r in rows if r[0] and not r[0].startswith("Q") and len(r) > 5]
+        # Annual rows: first col is 4-digit year OR Excel serial date (>10000)
+        # Quarterly rows start with "Q" — exclude those
+        annual = [r for r in rows
+                  if r[0] and not r[0].strip().startswith("Q") and len(r) > 5]
         if len(annual) < 2:
             return None
 
@@ -154,15 +166,16 @@ def _parse_table_12e() -> Optional[dict]:
             for row in reader:
                 if not row or not row[0]:
                     continue
-                # Annual rows: first col is a 4-digit year or Excel serial date
-                if row[0].startswith("Q"):
+                # Skip quarterly rows (start with Q1/Q2/Q3/Q4)
+                if row[0].strip().startswith("Q"):
                     continue
                 try:
-                    yr = int(float(row[0]))
-                    # Detect Excel serial: values > 10000 are serial dates, < 2050 are years
-                    if yr > 10000:
-                        continue    # serial date row — skip
-                    annual_rows.append((yr, row))
+                    raw = float(row[0].replace(",", "").strip())
+                    # Excel serial date (>10000) → convert to calendar year
+                    # Regular year (<= 2100) → use as-is
+                    yr = _xl_serial_to_year(raw) if raw > 10000 else int(raw)
+                    if yr and 2000 <= yr <= 2100:
+                        annual_rows.append((yr, row))
                 except (ValueError, TypeError):
                     continue
 

@@ -19,6 +19,20 @@ from pipeline.benchmarks import get_benchmark
 from pipeline.hidden_costs import calculate_hidden_costs, calculate_financing
 from pipeline.zoning import get_zoning_rules
 
+# ── SAMA live financing rates (cached per process run to avoid repeated CSV reads) ──
+_SAMA_RATES_CACHE: dict = {}
+
+def _get_debt_rate() -> float:
+    """Return current debt rate (SAIBOR 3M + 200bps) from SAMA, with fallback."""
+    global _SAMA_RATES_CACHE
+    if not _SAMA_RATES_CACHE:
+        try:
+            from sources.sama.scraper import get_wacc_inputs
+            _SAMA_RATES_CACHE = get_wacc_inputs()
+        except Exception:
+            _SAMA_RATES_CACHE = {"debt_rate_pct": 7.0}   # safe fallback
+    return _SAMA_RATES_CACHE.get("debt_rate_pct", 7.0) / 100.0
+
 
 def _base_roi_inputs(analysis: dict) -> dict:
     """Extract and normalise shared inputs for all ROI calculations."""
@@ -182,13 +196,15 @@ def calculate_roi_scenarios(analysis: dict) -> dict:
     else:
         breakeven_sell_sqm = 0
 
-    # ── Financing: what if 70% financed at 7% for 5 years ─────────────────────
+    # ── Financing: 70% financed at live SAIBOR+200bps rate for 5 years ────────
+    debt_rate = _get_debt_rate()   # e.g. 0.0727 from SAMA CSV (SAIBOR 3M + 200bps spread)
     financing = calculate_financing(
         expected["total_investment_sar"],
         financing_pct=0.70,
-        annual_rate=0.07,
+        annual_rate=debt_rate,
         years=5,
     )
+    financing["annual_rate_pct"] = round(debt_rate * 100, 2)   # store for display
 
     # Effective ROI after financing costs = return ON EQUITY (not on total debt)
     # Numerator: revenue minus all costs including principal + interest repayment

@@ -15,6 +15,22 @@ from pipeline.benchmarks import get_benchmark, get_price_trend
 from pipeline.market_depth import analyze_market_depth
 from sources.osm.scraper import get_nearby_amenities
 
+def _wafi_supply_context(city: str, district: str) -> str:
+    """Return WAFI market velocity string for Ollama prompt. Silent on failure."""
+    if not city:
+        return ""
+    try:
+        from sources.wafi.scraper import get_supply_pipeline
+        d = get_supply_pipeline(city, district)
+        if d.get("is_mock") or not d.get("deed_count_per_q"):
+            return ""
+        trend_icon = {"rising": "📈", "falling": "📉", "stable": "➡️"}.get(d["market_trend"], "")
+        risk_icon  = {"Low": "✅", "Medium": "⚠️", "High": "🔴"}.get(d["absorption_risk"], "")
+        return (f"📊 حركة سوق الأراضي (آخر 4 أرباع): {d['deed_count_per_q']:.0f} صفقة/ربع "
+                f"{trend_icon} | مخاطر التشبع: {risk_icon} {d['absorption_risk']}")
+    except Exception as e:
+        return ""
+
 logger = get_logger("analyzer")
 
 
@@ -145,6 +161,9 @@ def _build_market_context(city: str, district: str, price_sqm: float, listing: d
         supply_str = f"⚠️ المنطقة مشبعة بالمعروض ({depth['total_known_supply']} عقار معروض حاليا). قد يكون من الصعب البيع."
     elif depth["market_condition"] == "LOW_SUPPLY":
         supply_str = f"🔥 المعروض في المنطقة قليل ومطلوب."
+
+    # WAFI market velocity (transaction rate from REGA quarterly data)
+    wafi_str = _wafi_supply_context(city, district)
         
     amenity_str = ""
     if listing and "amenities_cache" in listing:
@@ -161,6 +180,7 @@ def _build_market_context(city: str, district: str, price_sqm: float, listing: d
 حجم العينة: {bench['count']} عقار
 {trend_str}
 {supply_str}
+{wafi_str}
 {amenity_str}
 ==================
 """
