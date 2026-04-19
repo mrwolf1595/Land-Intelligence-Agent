@@ -53,7 +53,7 @@
 **Phase 1 — Data Quality (ابدأ هنا)**
 - [ ] 1.1 Haraj price extraction from bodyTEXT (`sources/haraj/scraper.py`)
 - [ ] 1.2 MOJ scraper verification and activation (`sources/moj/scraper.py`)
-- [ ] 1.3 Separate benchmark from scraping data — add `market_reference_prices` table
+- [x] 1.3 Separate benchmark from scraping data — add `market_reference_prices` table
 - [ ] 1.4 Cross-platform deduplication — `core/dedup.py`
 
 **Phase 2 — Financial Accuracy**
@@ -77,3 +77,11 @@
 - [ ] 6.1 End-to-end integration test
 - [ ] 6.2 Financial accuracy spot-check
 - [ ] 6.3 Final commit + push
+
+### Update 2026-04-19 — Phase 1.3 Closure Work
+
+- Added benchmark provenance fields in lookup/output (`source`, `as_of`, sample threshold for scraped fallback).
+- Added broker-facing transparency in WhatsApp notifications (source/sample/last update).
+- Added proposal transparency section in PDF template for benchmark provenance.
+- Added verification suite: `tests/test_phase1_3_benchmark_contracts.py` (5 scenarios).
+- Contract test status (local): 9/9 passing using unittest runner.

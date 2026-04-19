@@ -16,6 +16,27 @@ from core.logger import get_logger
 logger = get_logger("benchmarks")
 
 
+_REFERENCE_MAX_AGE_DAYS = 180
+
+
+def _is_fresh(date_str: str | None, max_age_days: int = _REFERENCE_MAX_AGE_DAYS) -> bool:
+    """Return True if the reference date is recent enough, else False.
+
+    Accepts YYYY-MM-DD or full ISO datetime strings.
+    """
+    if not date_str:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+    except Exception:
+        try:
+            dt = datetime.fromisoformat(str(date_str)[:10])
+        except Exception:
+            return False
+    age_days = (datetime.now() - dt.replace(tzinfo=None)).days
+    return age_days <= max_age_days
+
+
 def rebuild_benchmarks():
     """Recompute avg/median price-per-m² for every city+district pair.
 
@@ -91,7 +112,7 @@ def get_benchmark(city: str, district: str = "") -> dict | None:
         WHERE city = ? AND district = ? AND source = 'moj'
     """, (city, district)).fetchone()
 
-    if ref and ref[1] >= 2:
+    if ref and ref[1] >= 2 and _is_fresh(ref[2] or ref[3]):
         conn.close()
         return {
             "avg":    ref[0],
@@ -108,7 +129,7 @@ def get_benchmark(city: str, district: str = "") -> dict | None:
         WHERE city = ? AND district = ? AND source = 'local_moj'
     """, (city, district)).fetchone()
 
-    if ref_local and ref_local[1] >= 3:
+    if ref_local and ref_local[1] >= 3 and _is_fresh(ref_local[2] or ref_local[3]):
         conn.close()
         return {
             "avg":    ref_local[0],

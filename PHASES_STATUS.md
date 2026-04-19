@@ -41,6 +41,8 @@ v3 execution has started. The project is no longer in "code complete" state; gov
 - [x] Added governance baseline files (`RULES.md`, `memory/*`, `agents/*`)
 - [x] Fixed critical runtime issue in matching path (`core/database.py` row mapping)
 - [x] Added baseline automated tests for Phase 1/2 contracts (`tests/test_phase1_phase2_contracts.py`)
+- [x] Added Phase 1.3 benchmark contract tests (`tests/test_phase1_3_benchmark_contracts.py`)
+- [x] Added benchmark provenance transparency to notifier + proposal output
 - [ ] Add Gate 1-5 artifacts per feature cycle (documented independently)
 - [ ] Expand scenario tests to include bridge ingestion and notifier delivery failure cases
 

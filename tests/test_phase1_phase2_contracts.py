@@ -8,7 +8,15 @@ class FakeChatClient:
         self.content = content
 
     def chat(self, **kwargs):
-        return {"message": {"content": self.content}}
+        class _Msg:
+            def __init__(self, content: str):
+                self.content = content
+
+        class _Resp:
+            def __init__(self, content: str):
+                self.message = _Msg(content)
+
+        return _Resp(self.content)
 
 
 class TestClassifierContracts(unittest.TestCase):

@@ -102,6 +102,33 @@ class TestPhase13BenchmarkContracts(unittest.TestCase):
         self.assertEqual(bench['count'], 11)
         self.assertEqual(bench['as_of'], '2026-04-10')
 
+    def test_SCN_BENCH_006_stale_reference_falls_back_to_scraped(self):
+        from core.database import get_conn
+        from pipeline.benchmarks import get_benchmark
+
+        conn = get_conn()
+        conn.execute(
+            """
+            INSERT INTO market_reference_prices
+            (city, district, price_per_sqm, source, transaction_date, sample_count, created_at)
+            VALUES ('الخبر','الحزام',8400,'moj','2020-01-01',10,'2020-01-01T00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO price_benchmarks
+            (city, district, avg_price_per_sqm, median_price_per_sqm, sample_count, last_updated)
+            VALUES ('الخبر','الحزام',7600,7550,12,'2026-04-08T12:00:00')
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        bench = get_benchmark('الخبر', 'الحزام')
+        self.assertIsNotNone(bench)
+        self.assertEqual(bench['source'], 'scraped')
+        self.assertEqual(bench['avg'], 7600)
+
 
 class TestPhase13NotifierTransparency(unittest.TestCase):
     def test_SCN_BENCH_005_notifier_mentions_benchmark_source(self):
