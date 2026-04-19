@@ -86,7 +86,7 @@ def get_benchmark(city: str, district: str = "") -> dict | None:
 
     # ── 1. Live MOJ API prices (trending districts — freshest data) ──────────
     ref = conn.execute("""
-        SELECT price_per_sqm, sample_count
+        SELECT price_per_sqm, sample_count, transaction_date, created_at
         FROM market_reference_prices
         WHERE city = ? AND district = ? AND source = 'moj'
     """, (city, district)).fetchone()
@@ -98,11 +98,12 @@ def get_benchmark(city: str, district: str = "") -> dict | None:
             "median": ref[0],
             "count":  ref[1],
             "source": "moj",
+            "as_of":  ref[2] or ref[3],
         }
 
     # ── 2. Local MOJ CSV (1.4M transactions — comprehensive city coverage) ───
     ref_local = conn.execute("""
-        SELECT price_per_sqm, sample_count
+        SELECT price_per_sqm, sample_count, transaction_date, created_at
         FROM market_reference_prices
         WHERE city = ? AND district = ? AND source = 'local_moj'
     """, (city, district)).fetchone()
@@ -114,16 +115,23 @@ def get_benchmark(city: str, district: str = "") -> dict | None:
             "median": ref_local[0],
             "count":  ref_local[1],
             "source": "local_moj",
+            "as_of":  ref_local[2] or ref_local[3],
         }
 
     # ── 3. Fallback: scraped ask-price benchmarks ─────────────────────────────
     row = conn.execute("""
-        SELECT avg_price_per_sqm, median_price_per_sqm, sample_count
+        SELECT avg_price_per_sqm, median_price_per_sqm, sample_count, last_updated
         FROM price_benchmarks WHERE city=? AND district=?
     """, (city, district)).fetchone()
     conn.close()
-    if row:
-        return {"avg": row[0], "median": row[1], "count": row[2], "source": "scraped"}
+    if row and row[2] >= 5:
+        return {
+            "avg": row[0],
+            "median": row[1],
+            "count": row[2],
+            "source": "scraped",
+            "as_of": row[3],
+        }
     return None
 
 

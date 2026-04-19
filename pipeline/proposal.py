@@ -56,7 +56,10 @@ def generate_proposal(analysis: dict, financial: dict, mockup: dict = None) -> s
         "timeline_months": str(financial.get("timeline_months", "?")),
         "flags": [shape_arabic(f) for f in analysis.get("flags", [])],
         "risks": [shape_arabic(r) for r in analysis.get("risks", [])],
-        "map_location": shape_arabic(analysis.get("location", ""))
+        "map_location": shape_arabic(analysis.get("location", "")),
+        "benchmark_source": shape_arabic(_bench_source_label(analysis.get("benchmark_source"))),
+        "benchmark_sample_count": analysis.get("benchmark_sample_count") or "غير متاح",
+        "benchmark_as_of": shape_arabic(str(analysis.get("benchmark_as_of") or "غير متاح")),
     }
     
     html_str = template.render(context)
@@ -75,3 +78,12 @@ def generate_proposal(analysis: dict, financial: dict, mockup: dict = None) -> s
     except Exception as e:
         logger.error(f"Failed to generate PDF: {e}")
         return None
+
+
+def _bench_source_label(source: str | None) -> str:
+    mapping = {
+        "moj": "وزارة العدل (MOJ) - صفقات فعلية",
+        "local_moj": "MOJ محلي (CSV) - صفقات فعلية",
+        "scraped": "منصات إعلانية (Scraped) - عروض وليس صفقات",
+    }
+    return mapping.get((source or "").lower(), "غير متاح")

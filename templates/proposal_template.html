@@ -133,6 +133,24 @@
         </div>
     </div>
 
+    <div class="section">
+        <h2 class="section-title">مرجعية التسعير (Benchmark Provenance)</h2>
+        <div class="data-grid">
+            <div class="data-row">
+                <div class="data-label">مصدر المرجعية:</div>
+                <div class="data-value">{{ benchmark_source }}</div>
+            </div>
+            <div class="data-row">
+                <div class="data-label">حجم العينة:</div>
+                <div class="data-value">{{ benchmark_sample_count }}</div>
+            </div>
+            <div class="data-row">
+                <div class="data-label">آخر تحديث:</div>
+                <div class="data-value">{{ benchmark_as_of }}</div>
+            </div>
+        </div>
+    </div>
+
     {% if flags or risks %}
     <div class="section">
         <h2 class="section-title">ملاحظات هامة (Risks & Flags)</h2>

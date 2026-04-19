@@ -229,6 +229,7 @@ def analyze_land(listing_data: dict) -> dict:
 """
     ollama_ok = False
     try:
+        logger.debug(f"[analyzer] calling Ollama for: {listing_data.get('title','')[:60]}")
         response = client.chat(
             model=OLLAMA_MODEL,
             messages=[
@@ -236,12 +237,13 @@ def analyze_land(listing_data: dict) -> dict:
                 {"role": "user", "content": prompt}
             ],
             format="json",
-            options={"temperature": 0.1, "num_gpu": 10}
+            options={"temperature": 0.1}
         )
         raw = response.message.content.strip()
         parsed = json.loads(_extract_json(raw))
         parsed["source_url"] = listing_data.get("source_url", "")
         ollama_ok = True
+        logger.info(f"[analyzer] ✅ Ollama score={parsed.get('opportunity_score')} for: {listing_data.get('title','')[:50]}")
 
         # Determine confidence
         parsed["confidence"] = _determine_confidence(bench, ollama_ok)
@@ -250,6 +252,8 @@ def analyze_land(listing_data: dict) -> dict:
         if bench:
             parsed["benchmark_avg_sqm"] = bench["avg"]
             parsed["benchmark_sample_count"] = bench["count"]
+            parsed["benchmark_source"] = bench.get("source")
+            parsed["benchmark_as_of"] = bench.get("as_of")
 
         return parsed
     except Exception as e:
@@ -271,4 +275,6 @@ def analyze_land(listing_data: dict) -> dict:
         if bench:
             result["benchmark_avg_sqm"] = bench["avg"]
             result["benchmark_sample_count"] = bench["count"]
+            result["benchmark_source"] = bench.get("source")
+            result["benchmark_as_of"] = bench.get("as_of")
         return result

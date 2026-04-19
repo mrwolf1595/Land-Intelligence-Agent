@@ -68,6 +68,9 @@ def notify_broker_opportunity(analysis: dict, financial: dict, pdf_path: str = N
         pes_roi = 0
 
     score = analysis.get("opportunity_score", 0)
+    bench_source = _bench_source_label(analysis.get("benchmark_source"))
+    bench_count = analysis.get("benchmark_sample_count")
+    bench_as_of = analysis.get("benchmark_as_of")
     
     red_flags = analysis.get("red_flags", [])
     flags_msg = ""
@@ -85,6 +88,11 @@ def notify_broker_opportunity(analysis: dict, financial: dict, pdf_path: str = N
 💰 السعر: {_fmt_price(analysis.get('asking_price_sar'))}
 🏆 درجة الفرصة: {score}/10{flags_msg}
 🏢 التطوير المقترح: {_dev_label(analysis.get('recommended_development'))}
+
+📚 *مرجعية التسعير:*
+• المصدر: {bench_source}
+• حجم العينة: {bench_count if bench_count else 'غير متاح'}
+• آخر تحديث: {bench_as_of if bench_as_of else 'غير متاح'}
 
 💹 *النموذج المالي (السيناريو المتوقع):*
 • إجمالي الاستثمار (مع الرسوم المخفية): {_fmt_price(total_inv)}
@@ -133,3 +141,12 @@ def _dev_label(dev_type: str) -> str:
         "mixed": "متعدد الاستخدامات"
     }
     return mapping.get(str(dev_type).lower(), "غير محدد")
+
+
+def _bench_source_label(source: str | None) -> str:
+    mapping = {
+        "moj": "وزارة العدل (MOJ) — صفقات فعلية",
+        "local_moj": "MOJ محلي (CSV) — صفقات فعلية",
+        "scraped": "منصات إعلانية (Scraped) — عروض وليس صفقات",
+    }
+    return mapping.get((source or "").lower(), "غير متاح")
